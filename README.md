@@ -1,16 +1,46 @@
 # VollSeg
 
-A clean, hierarchical, composable rewrite of [VollSeg](https://github.com/Kapoorlabs-CAPED/VollSeg) for biological image segmentation.
+Hierarchical, composable segmentation for biological image data — a clean rewrite of the original [VollSeg](https://github.com/Kapoorlabs-CAPED/VollSeg).
 
-`pip install vollseg` (versioning continues from the original VollSeg — this package supersedes it.)
+```bash
+pip install kapoorlabs-vollseg
+```
 
-> **Status:** Early scaffolding. The original VollSeg lives at `Kapoorlabs-CAPED/VollSeg` and remains the source of truth until a `1.0.0` release of this repo. There is **no migration shim** — this is a clean rewrite with a new API.
+PyTorch + PyTorch Lightning + [CAREamics](https://github.com/CAREamics/careamics) is the first-class backend. The original keras / csbdeep / stardist stack is kept as a legacy backend with a `Keras` suffix on every class name so already-trained `.h5` weights still work.
+
+---
+
+## Quick start
+
+```python
+import numpy as np
+from tifffile import imread
+from vollseg import StarDistSegmenter, MaskUNetSegmenter, VollSeg
+
+# Layer-1 singletons load themselves from Lightning checkpoints (PyTorch)
+# or from the Zenodo / HuggingFace pretrained registry (legacy keras).
+stardist = StarDistSegmenter.from_checkpoint(
+    "models/nuclei.ckpt",
+    rays=np.load("models/nuclei.rays.npy"),
+)
+roi = MaskUNetSegmenter.from_checkpoint("models/roi.ckpt")
+
+# Layer-3 factory composes the right pipeline shape from the supplied models.
+pipe = VollSeg.from_models(
+    stardist=stardist,
+    roi_unet=roi,         # → wraps in ROIPipeline
+    seedpool=False,
+)
+
+result = pipe.predict(imread("data/sample.tif"))
+print(result.labels.max(), "objects")
+```
 
 ---
 
 ## Why a rewrite?
 
-The original VollSeg grew organically into a single `utils.py` with branching `if/else` chains for every combination of *denoise / ROI / U-Net / StarDist / seedpool / 2D / 3D*. Adding a new mode meant editing the same few mega-functions; testing a single path required mocking the rest.
+The original VollSeg grew organically into a single `utils.py` with branching `if/else` chains for every combination of *denoise / ROI / U-Net / StarDist / seedpool / 2D / 3D*. Adding a mode meant editing the same mega-functions; testing one path required mocking the rest.
 
 This rewrite replaces that with three orthogonal layers, composed at runtime.
 
@@ -22,50 +52,54 @@ This rewrite replaces that with three orthogonal layers, composed at runtime.
                     ┌─────────────────────────────────┐
         Layer 3     │  VollSeg.from_models(...)       │   smart factory
                     │  → assembles the right pipeline │
+                    │  VollCellSeg.from_models(...)   │   sibling, for membrane
                     └─────────────────────────────────┘
                                    │
                     ┌──────────────┴──────────────────┐
         Layer 2     │  Composite Pipelines            │   composition, not inheritance
                     │  • UNetStarDistPipeline         │
-                    │  • DenoisedPipeline(wraps any)  │
-                    │  • ROIPipeline(wraps any)       │
-                    │  • Chunked(wraps any)           │
+                    │  • NucleiSeededCellPosePipeline │
+                    │  • DenoisedPipeline             │
+                    │  • ROIPipeline                  │
+                    │  • Chunked                      │
                     └──────────────┬──────────────────┘
                                    │
                     ┌──────────────┴──────────────────┐
         Layer 1     │  Singleton Models               │   one model, one job
                     │  • CAREDenoiser                 │
                     │  • UNetSegmenter                │
+                    │  • MaskUNetSegmenter            │
                     │  • StarDistSegmenter            │
+                    │  • CellPoseSegmenter            │
                     └─────────────────────────────────┘
 ```
 
 ### Layer 1 — Singletons
 
-Each does exactly one thing. Identical contract:
+Identical contract:
 
 ```python
-class Segmenter(Protocol):
-    def predict(self, image: np.ndarray, **runtime_opts) -> Result: ...
+class Pipeline(Protocol):
+    def predict(self, image: np.ndarray, **kwargs) -> Result: ...
 ```
 
-| Class                | Job                                    | Output                  |
-| -------------------- | -------------------------------------- | ----------------------- |
-| `CAREDenoiser`       | Denoise (CSBDeep CARE)                 | denoised image          |
-| `UNetSegmenter`      | Semantic segmentation + CC labeling    | labels + probability    |
-| `StarDistSegmenter`  | Instance segmentation (radial dist.)   | labels + polygons/polys |
+| Class                | Job                                       | Output (`Result.*`)                |
+| -------------------- | ----------------------------------------- | ---------------------------------- |
+| `CAREDenoiser`       | Denoise (CAREamics UNet, Lightning)       | `denoised`                         |
+| `UNetSegmenter`      | Binary semantic segmentation + CC labels  | `labels`, `semantic`, `probability`|
+| `MaskUNetSegmenter`  | Same as `UNetSegmenter`, separate weights | `labels`, `semantic`, `probability`|
+| `StarDistSegmenter`  | Instance segmentation via radial dists    | `labels`, `probability`            |
+| `CellPoseSegmenter`  | Membrane/cell segmentation (CellPose)     | `labels`                           |
 
 2D vs 3D is dispatched **inside** each singleton on `image.ndim` — no parallel `*2D` / `*3D` class trees.
 
-### Layer 2 — Composite Pipelines
-
-Composites are built by **wrapping** other pipelines (composition), not by subclassing. This keeps combinations linear instead of exploding (`denoise × roi × seedpool × 2d/3d` would otherwise be 16 subclasses).
+### Layer 2 — Composites (built by wrapping, not subclassing)
 
 ```python
-# StarDist + U-Net, fused via SeedPool
+# StarDist + U-Net, fused via SeedPool watershed
 pipe = UNetStarDistPipeline(unet, stardist, seedpool=True)
 
-# ...preceded by denoising
+# ...preceded by CARE denoising
 pipe = DenoisedPipeline(care, downstream=pipe)
 
 # ...gated by an ROI mask
@@ -73,89 +107,108 @@ pipe = ROIPipeline(roi_unet, downstream=pipe)
 
 # ...executed in overlapping chunks for huge volumes
 pipe = Chunked(pipe, chunk=(64, 256, 256), overlap=(8, 32, 32))
-
-result = pipe.predict(image)
 ```
 
-| Composite                | Wraps             | What it adds                                                |
-| ------------------------ | ----------------- | ----------------------------------------------------------- |
-| `UNetStarDistPipeline`   | unet + stardist   | Runs both; if `seedpool=True`, fuses via watershed/IoU      |
-| `DenoisedPipeline`       | any downstream    | CARE denoise → downstream                                   |
-| `ROIPipeline`            | any downstream    | U-Net mask → downstream restricted to ROI                   |
-| `Chunked`                | any downstream    | Overlapping tiles → predict → stitch (label-safe)           |
+| Composite                       | Wraps                | What it adds                                                |
+| ------------------------------- | -------------------- | ----------------------------------------------------------- |
+| `UNetStarDistPipeline`          | unet + stardist      | Runs both; if `seedpool=True`, fuses via watershed/IoU      |
+| `NucleiSeededCellPosePipeline`  | nuclei pipe + cellpose | Nuclei labels seed a CellPose-gated membrane watershed    |
+| `DenoisedPipeline`              | any downstream       | CARE denoise → downstream                                   |
+| `ROIPipeline`                   | any downstream       | U-Net mask → downstream restricted to ROI                   |
+| `Chunked`                       | any downstream       | Overlapping tiles → predict → label-safe stitch             |
 
-### Layer 3 — Smart factory
-
-Replaces the old monolithic `VollSeg()` if/else router. Inspects which models are provided and assembles the right composite chain:
+### Layer 3 — Smart factories
 
 ```python
 pipe = VollSeg.from_models(
     care=care_model,         # optional → wraps in DenoisedPipeline
     roi_unet=roi_model,      # optional → wraps in ROIPipeline
-    unet=unet_model,         # required for semantic / seedpool
-    stardist=stardist_model, # required for instance
-    seedpool=True,           # only meaningful when both unet+stardist
-    chunked=dict(chunk=..., overlap=...),  # optional → wraps in Chunked
+    unet=unet_model,         # optional
+    stardist=stardist_model, # optional
+    seedpool=True,           # only meaningful with both unet+stardist
+    chunk=(64, 256, 256),    # optional → wraps in Chunked
 )
 
-result = pipe.predict(image)
+# Sibling factory for membrane work — consumes a nuclei pipeline as input.
+pipe = VollCellSeg.from_models(
+    nuclei_pipeline=nuclei_pipe,
+    cellpose=cellpose_model,
+    care=membrane_denoiser,  # optional
+    nuclei_channel=1, membrane_channel=0,
+)
 ```
 
-Rule: provided models determine the pipeline shape; runtime options (`seedpool`, `chunked`, ...) tune behavior. No silent fallbacks — missing required models raise at construction time, not at `.predict`.
+Rule: provided models determine the pipeline shape; runtime knobs tune behavior. No silent fallbacks — invalid combinations raise at construction, not at `.predict`.
 
 ---
 
-## Training
+## Two backends — PyTorch first-class, Keras legacy
 
-Training lives in a sibling subpackage and is **completely separated** from inference. A trainer is not a model — it produces one.
+| Concern         | PyTorch (default)                                     | Keras legacy                                                |
+| --------------- | ----------------------------------------------------- | ----------------------------------------------------------- |
+| Class names     | `CAREDenoiser`, `UNetSegmenter`, …                    | `CAREDenoiserKeras`, `UNetSegmenterKeras`, …                |
+| Model arch      | CAREamics UNet + Lightning                            | csbdeep CARE / stardist                                     |
+| Checkpoints     | `.ckpt` (Lightning) — `from_checkpoint(path)`         | csbdeep folder (`config.json` + `weights_*.h5`)             |
+| Pretrained zoo  | `vollseg.hub.XENOPUS_MODELS` (HuggingFace)            | `vollseg.pretrained` (Zenodo)                               |
 
-```
-vollseg/
-├── models/        # Layer 1 inference singletons
-├── pipelines/     # Layer 2 composites + Layer 3 factory
-├── train/
-│   ├── care.py            # CAREDenoiser.Trainer
-│   ├── unet.py            # UNetSegmenter.Trainer
-│   ├── stardist.py        # StarDistSegmenter.Trainer (2D & 3D)
-│   └── smartseeds.py      # joint U-Net + StarDist training harness
-├── data/
-│   ├── patches.py         # SmartPatches: foreground/background veto
-│   └── tiles.py           # tiled loaders
-└── eval/
-    ├── matching.py        # IoU / F1 / precision / recall
-    └── threshold.py       # threshold optimization
-```
+Both implement the same `Pipeline.predict(image) -> Result` contract, so any composite or factory accepts either or both interchangeably.
 
-`SmartPatches` keeps the patch-vetoing logic (configurable `lower_ratio_fore_to_back` / `upper_ratio_fore_to_back`, per-image cap), but exposes it as a clean iterable of patches rather than a side-effecting script.
+The bare-named PyTorch classes are the supported direction. The `*Keras` variants exist to keep already-trained `.h5` weights usable. `StarDistSegmenterKeras` currently has no PyTorch counterpart in the inference path — the `vollseg.stardist` rewrite ships training, but you can keep using the keras singleton for inference until you retrain.
 
 ---
 
-## Package layout
+## Pretrained Xenopus model zoo (HuggingFace)
+
+Public model repos live under `KapoorLabs-Copenhagen/` on HuggingFace. The scripts call `vollseg.ensure_model(model_dir, model_name)` for each configured model — if the directory `<model_dir>/<model_name>/` doesn't exist locally, it's downloaded automatically.
+
+```python
+from vollseg import ensure_model, XENOPUS_MODELS
+
+ensure_model("./models/StarDist3D", "nuclei_xenopus_mari")
+# → downloads from KapoorLabs-Copenhagen/xenopus-stardist3d-nuclei-mari
+```
+
+Mapping lives in [`src/vollseg/hub.py`](src/vollseg/hub.py). See [`scripts/README.md`](scripts/README.md) for the full table and one-time upload helper.
+
+---
+
+## Repository layout
 
 ```
-src/vollseg/
-├── __init__.py            # public API surface
-├── models/                # Layer 1
-│   ├── care.py
-│   ├── unet.py
-│   └── stardist.py
-├── pipelines/             # Layer 2 + 3
-│   ├── base.py            # Pipeline protocol, Result dataclass
-│   ├── unet_stardist.py
-│   ├── denoised.py
-│   ├── roi.py
-│   ├── chunked.py
-│   └── factory.py         # VollSeg.from_models
-├── train/                 # training harnesses
-├── data/                  # patch + tile generation
-├── eval/                  # metrics + threshold tuning
-├── pretrained.py          # Zenodo model registry
-└── io.py                  # image readers (inrimage, spatial_image)
+KapoorLabs-VollSeg/
+├── src/vollseg/
+│   ├── _backbones/           csbdeep / stardist / careamics / cellpose backbone wrappers
+│   ├── _lightning/           inlined Lightning support (CareModule, dataset, stitch, transforms)
+│   ├── models/               Layer-1 singletons (PyTorch + Keras siblings)
+│   ├── pipelines/            Layer-2 composites + Layer-3 factories
+│   ├── stardist/             pure-PyTorch StarDist (rays, distance, model, losses, training, inference)
+│   ├── train/                Lightning + csbdeep trainers
+│   ├── data/                 file IO, label morphology, Sequence loaders, SmartPatches
+│   ├── eval/                 matching metrics, NMS, threshold optimization
+│   ├── fusion.py             watershed_fuse, cellpose_watershed_fuse
+│   ├── hub.py                HuggingFace auto-download for the Xenopus model zoo
+│   ├── pretrained.py         legacy Zenodo registry (csbdeep weights)
+│   └── seedpool.py           SeedPool / UnetStarMask geometry primitives
+├── scripts/                  Hydra-driven CLI: enhance, segment, score, train_stardist
+├── docs/                     Per-module READMEs: care.md, unet.md, stardist.md
+├── tests/                    pytest suite (PyTorch path; keras kept legacy)
+├── pyproject.toml            packaging + dependencies
+├── setup.cfg                 setuptools metadata
+└── update_version.py         git-tag → src/vollseg/_version.py
 ```
 
 ---
 
-## Design rules (binding)
+## Documentation
+
+- [`docs/care.md`](docs/care.md) — CARE denoising in PyTorch (Backbone, Singleton, Trainer)
+- [`docs/unet.md`](docs/unet.md) — U-Net + MaskUNet semantic segmentation
+- [`docs/stardist.md`](docs/stardist.md) — full PyTorch StarDist rewrite (algorithm, training, inference)
+- [`scripts/README.md`](scripts/README.md) — Hydra segmentation pipelines + the StarDist demo script + HF model upload
+
+---
+
+## Design rules
 
 1. **Composition over inheritance** for combining behaviors — wrap, don't subclass.
 2. **One responsibility per class.** A class either trains, or predicts, or composes — never two.
@@ -167,22 +220,20 @@ src/vollseg/
 
 ---
 
-## Roadmap
+## Development
 
-- [x] Layer 1 singletons (`CAREDenoiser`, `UNetSegmenter`, `MaskUNetSegmenter`, `StarDistSegmenter`)
-- [x] `Pipeline` protocol + `Result` dataclass
-- [x] `UNetStarDistPipeline` with optional seedpool fusion
-- [x] `DenoisedPipeline`, `ROIPipeline`, `Chunked` wrappers
-- [x] `VollSeg.from_models` factory
-- [x] Trainers (`train/`) — `CARETrainer`, `UNetTrainer`, `StarDistTrainer`, `SmartSeeds`
-- [x] `SmartPatches` ported (single-channel, foreground/background veto)
-- [x] Eval (`eval/`) — `matching`, `matching_dataset`, `NMSLabel`, `OptimizeThreshold`
-- [x] Pretrained Zenodo registry parity (CARE / UNET / MaskUNET / StarDist 2D & 3D)
-- [ ] Test suite covering each composite path independently
-- [ ] `1.0.0` release on PyPI (continuing the original `vollseg` version line)
+```bash
+git clone https://github.com/Kapoorlabs-CAPED/KapoorLabs-VollSeg
+cd KapoorLabs-VollSeg
+pip install -e ".[testing]"
+pre-commit install
+pytest tests/ -v
+```
+
+The pre-commit hooks run `pyupgrade` (py39+), `black`, `flake8`, `autoflake`, plus a local `update_version.py` hook that syncs `src/vollseg/_version.py` from the most recent git tag.
 
 ---
 
 ## License
 
-Same license as the original VollSeg (see `LICENSE`).
+BSD-3-Clause — see [`LICENSE`](LICENSE). Same as upstream VollSeg.
