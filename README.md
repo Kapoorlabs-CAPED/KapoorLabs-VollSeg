@@ -1,5 +1,11 @@
 # VollSeg
 
+[![PyPI version](https://img.shields.io/pypi/v/kapoorlabs-vollseg.svg?maxAge=2591000)](https://pypi.org/project/kapoorlabs-vollseg/)
+[![Python versions](https://img.shields.io/pypi/pyversions/kapoorlabs-vollseg.svg)](https://pypi.org/project/kapoorlabs-vollseg/)
+[![License](https://img.shields.io/pypi/l/kapoorlabs-vollseg.svg?color=green)](https://github.com/Kapoorlabs-CAPED/KapoorLabs-VollSeg/raw/main/LICENSE)
+[![Deploy](https://github.com/Kapoorlabs-CAPED/KapoorLabs-VollSeg/actions/workflows/deploy.yml/badge.svg)](https://github.com/Kapoorlabs-CAPED/KapoorLabs-VollSeg/actions/workflows/deploy.yml)
+[![Twitter](https://badgen.net/badge/icon/twitter?icon=twitter&label)](https://twitter.com/entracod)
+
 Hierarchical, composable segmentation for biological image data — a clean rewrite of the original [VollSeg](https://github.com/Kapoorlabs-CAPED/VollSeg).
 
 ```bash
