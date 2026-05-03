@@ -18,12 +18,18 @@ except ImportError:
 
 from ._backbones import (
     CAREBackbone,
+    MaskUNetBackbone,
     StarDist2DBackbone,
     StarDist3DBackbone,
     UNetBackbone,
 )
 from .fusion import watershed_fuse
-from .models import CAREDenoiser, StarDistSegmenter, UNetSegmenter
+from .models import (
+    CAREDenoiser,
+    MaskUNetSegmenter,
+    StarDistSegmenter,
+    UNetSegmenter,
+)
 from .pipelines import (
     Chunked,
     DenoisedPipeline,
@@ -45,6 +51,7 @@ __all__ = [
     # Layer 1
     "CAREDenoiser",
     "UNetSegmenter",
+    "MaskUNetSegmenter",
     "StarDistSegmenter",
     # Layer 2
     "UNetStarDistPipeline",
@@ -62,6 +69,7 @@ __all__ = [
     # backbones
     "CAREBackbone",
     "UNetBackbone",
+    "MaskUNetBackbone",
     "StarDist2DBackbone",
     "StarDist3DBackbone",
     # registry
@@ -76,7 +84,7 @@ __all__ = [
 # Same URLs and hashes as the original VollSeg, but keyed by the new
 # backbone classes so existing notebooks can ``from_pretrained(...)``.
 clear_models_and_aliases(
-    StarDist2DBackbone, StarDist3DBackbone, UNetBackbone, CAREBackbone
+    StarDist2DBackbone, StarDist3DBackbone, UNetBackbone, MaskUNetBackbone, CAREBackbone
 )
 
 register_model(
@@ -145,6 +153,18 @@ register_model(
     "https://zenodo.org/record/6060177/files/Montgomery_county.zip",
     "be41937a00693e28961358440d242417",
 )
+register_model(
+    MaskUNetBackbone,
+    "Xenopus_Cell_Tissue_Segmentation",
+    "https://zenodo.org/record/6060378/files/Xenopus_tissue_model.zip",
+    "2694d8b05fa828aceb055eef8cd5ca1f",
+)
+register_model(
+    MaskUNetBackbone,
+    "Unet_Arabidopsis_Mask",
+    "https://zenodo.org/record/6670732/files/Unet_Arabidopsis_Mask.zip",
+    "114df78e0153b39d80d0253a4dcc236f",
+)
 
 register_aliases(UNetBackbone, "Embryo Cell Model (3D)", "Embryo Cell Model (3D)")
 register_aliases(StarDist2DBackbone, "White_Blood_Cells", "White_Blood_Cells")
@@ -157,4 +177,8 @@ register_aliases(
 register_aliases(UNetBackbone, "Xenopus Tissue (2D)", "Xenopus Tissue (2D)")
 register_aliases(UNetBackbone, "Unet_Lung_Segmentation", "Unet_Lung_Segmentation")
 register_aliases(UNetBackbone, "Unet_Arabidopsis", "Unet_Arabidopsis")
+register_aliases(
+    MaskUNetBackbone, "Xenopus_Cell_Tissue_Segmentation", "Xenopus_Cell_Tissue_Segmentation"
+)
+register_aliases(MaskUNetBackbone, "Unet_Arabidopsis_Mask", "Unet_Arabidopsis_Mask")
 register_aliases(CAREBackbone, "Denoise_3D_cells", "Denoise_3D_cells")

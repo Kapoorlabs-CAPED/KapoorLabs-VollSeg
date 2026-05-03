@@ -11,7 +11,8 @@ composed by the Layer 2 wrappers without further adaptation.
 """
 
 from .care import CAREDenoiser
+from .maskunet import MaskUNetSegmenter
 from .stardist import StarDistSegmenter
 from .unet import UNetSegmenter
 
-__all__ = ["CAREDenoiser", "UNetSegmenter", "StarDistSegmenter"]
+__all__ = ["CAREDenoiser", "UNetSegmenter", "MaskUNetSegmenter", "StarDistSegmenter"]

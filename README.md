@@ -169,14 +169,15 @@ src/vollseg/
 
 ## Roadmap
 
-- [ ] Layer 1 singletons (`CAREDenoiser`, `UNetSegmenter`, `StarDistSegmenter`)
-- [ ] `Pipeline` protocol + `Result` dataclass
-- [ ] `UNetStarDistPipeline` with optional seedpool fusion
-- [ ] `DenoisedPipeline`, `ROIPipeline`, `Chunked` wrappers
-- [ ] `VollSeg.from_models` factory
-- [ ] Trainers (`train/`) ported from the legacy `SmartSeeds*` / `UNET` / `StarDist*` classes
-- [ ] `SmartPatches` ported as a clean iterable
-- [ ] Pretrained Zenodo registry parity
+- [x] Layer 1 singletons (`CAREDenoiser`, `UNetSegmenter`, `MaskUNetSegmenter`, `StarDistSegmenter`)
+- [x] `Pipeline` protocol + `Result` dataclass
+- [x] `UNetStarDistPipeline` with optional seedpool fusion
+- [x] `DenoisedPipeline`, `ROIPipeline`, `Chunked` wrappers
+- [x] `VollSeg.from_models` factory
+- [x] Trainers (`train/`) — `CARETrainer`, `UNetTrainer`, `StarDistTrainer`, `SmartSeeds`
+- [x] `SmartPatches` ported (single-channel, foreground/background veto)
+- [x] Eval (`eval/`) — `matching`, `matching_dataset`, `NMSLabel`, `OptimizeThreshold`
+- [x] Pretrained Zenodo registry parity (CARE / UNET / MaskUNET / StarDist 2D & 3D)
 - [ ] Test suite covering each composite path independently
 - [ ] `1.0.0` release on PyPI (continuing the original `vollseg` version line)
 

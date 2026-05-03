@@ -6,12 +6,14 @@ for the inference singletons that wrap them.
 """
 
 from .care import CAREBackbone
-from .unet import UNetBackbone
+from .maskunet import MaskUNetBackbone
 from .stardist import StarDist2DBackbone, StarDist3DBackbone
+from .unet import UNetBackbone
 
 __all__ = [
     "CAREBackbone",
     "UNetBackbone",
+    "MaskUNetBackbone",
     "StarDist2DBackbone",
     "StarDist3DBackbone",
 ]
