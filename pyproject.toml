@@ -36,6 +36,10 @@ dependencies = [
     "torch",
     "lightning",
     "careamics",
+    # Auto-download of pretrained Xenopus models from HuggingFace.
+    "huggingface_hub",
+    # H5 storage for StarDist (and future) training data.
+    "h5py",
     # Keras legacy backend (StarDist still has no PyTorch port; keras
     # CARE / U-Net classes also remain supported for existing weights).
     "csbdeep",

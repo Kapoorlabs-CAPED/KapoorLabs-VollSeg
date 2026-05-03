@@ -56,6 +56,69 @@ python scripts/01_nuclei_segmentation.py model_paths=local
 The factory composes them in the order: `chunked(roi(denoised(unet+stardist)))`
 — matching the diagram in the top-level README.
 
+## Pretrained models — auto-download from HuggingFace
+
+The Xenopus model zoo lives as public model repos under
+`huggingface.co/KapoorLabs-Copenhagen/`. The scripts call
+`vollseg.ensure_model(model_dir, model_name)` for every configured model
+before constructing backbones — if the directory `<model_dir>/<model_name>/`
+doesn't exist locally, it's downloaded automatically.
+
+The mapping `model_name → HF repo id` lives in
+[`src/vollseg/hub.py`](../src/vollseg/hub.py):
+
+| `model_name` (from YAML)       | HF repo                                                            |
+| ------------------------------ | ------------------------------------------------------------------ |
+| `membrane_edge_enhancement`    | `KapoorLabs-Copenhagen/xenopus-care-membrane-edge-enhancement`     |
+| `unet_nuclei_xenopus_mari`     | `KapoorLabs-Copenhagen/xenopus-unet3d-nuclei-mari`                 |
+| `unet_membrane_xenopus_mari`   | `KapoorLabs-Copenhagen/xenopus-unet3d-membrane-mari`               |
+| `unet_roi_nuclei_xenopus`      | `KapoorLabs-Copenhagen/xenopus-maskunet-roi-nuclei`                |
+| `nuclei_xenopus_mari`          | `KapoorLabs-Copenhagen/xenopus-stardist3d-nuclei-mari`             |
+| `membrane_xenopus_mari`        | `KapoorLabs-Copenhagen/xenopus-stardist3d-membrane-mari`           |
+| `mem_mneongreen`               | `KapoorLabs-Copenhagen/xenopus-cellpose-mem-mneongreen`            |
+
+### One-time upload (you run this once)
+
+The model weights live today as private folders inside the dataset
+`KapoorLabs-Copenhagen/Xenopus_Models`. To migrate them into the public
+model repos referenced above:
+
+```bash
+# 1. Pull the dataset locally (or point --source at where it already is)
+huggingface-cli login    # one-time
+git lfs clone https://huggingface.co/datasets/KapoorLabs-Copenhagen/Xenopus_Models
+
+# 2. Dry-run to confirm what will be uploaded
+python scripts/_upload_models_to_hf.py \
+    --source Xenopus_Models/Mari_Models \
+    --dry-run
+
+# 3. Actually create + upload each model repo
+python scripts/_upload_models_to_hf.py \
+    --source Xenopus_Models/Mari_Models
+```
+
+The helper creates each repo as **public**, writes a minimal model card
+if the source folder has none, and uploads the contents. Source layout
+expected (only these are migrated; cellpose3D and the other CellPose
+checkpoints are deliberately ignored):
+
+```
+Mari_Models/
+├── CARE/membrane_edge_enhancement/
+├── Unet3D/unet_nuclei_xenopus_mari/
+├── Unet3D/unet_membrane_xenopus_mari/
+├── MASKUNET/unet_roi_nuclei_xenopus/
+├── StarDist3D/nuclei_xenopus_mari/
+├── StarDist3D/membrane_xenopus_mari/
+└── CellPose/mem_mneongreen
+```
+
+To add a new model later: upload it under `KapoorLabs-Copenhagen/...`,
+add an entry to `vollseg.hub.XENOPUS_MODELS`, and an entry to
+`scripts/_upload_models_to_hf.py:SOURCE_LAYOUT` if you want the helper
+to handle it.
+
 ## CellPose / membrane workflow
 
 The CellPose hierarchy is a sibling of `VollSeg`, with its own factory:

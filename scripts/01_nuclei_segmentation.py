@@ -74,6 +74,7 @@ def _build_unet(config: SegmentScenario) -> Optional[Pipeline]:
         return UNetSegmenter.from_checkpoint(
             mp.unet_nuclei_checkpoint, min_size=p.min_size_mask, **_pt_kwargs(p)
         )
+    ensure_model(mp.unet_model_dir, mp.unet_nuclei_model_name)
     return UNetSegmenterKeras(
         UNetBackboneKeras(config=None, name=mp.unet_nuclei_model_name, basedir=mp.unet_model_dir),
         min_size=p.min_size_mask,
@@ -88,6 +89,7 @@ def _build_roi(config: SegmentScenario) -> Optional[Pipeline]:
         return MaskUNetSegmenter.from_checkpoint(
             mp.roi_nuclei_checkpoint, min_size=p.min_size_mask, **_pt_kwargs(p)
         )
+    ensure_model(mp.roi_model_dir, mp.roi_nuclei_model_name)
     return MaskUNetSegmenterKeras(
         MaskUNetBackboneKeras(config=None, name=mp.roi_nuclei_model_name, basedir=mp.roi_model_dir),
         min_size=p.min_size_mask,
@@ -100,12 +102,14 @@ def _build_care(config: SegmentScenario) -> Optional[Pipeline]:
     mp, p = config.model_paths, config.parameters
     if mp.care_membrane_checkpoint:
         return CAREDenoiser.from_checkpoint(mp.care_membrane_checkpoint, **_pt_kwargs(p))
+    ensure_model(mp.care_model_dir, mp.care_membrane_model_name)
     return CAREDenoiserKeras(
         CAREBackboneKeras(config=None, name=mp.care_membrane_model_name, basedir=mp.care_model_dir)
     )
 
 
 def _build_pipeline(config: SegmentScenario) -> Pipeline:
+    ensure_model(config.model_paths.star_model_dir, config.model_paths.star_nuclei_model_name)
     star = StarDistSegmenterKeras(
         StarDist3DBackboneKeras(
             config=None,

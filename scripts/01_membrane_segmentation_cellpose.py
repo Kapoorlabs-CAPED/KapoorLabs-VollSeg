@@ -21,7 +21,12 @@ from natsort import natsorted
 from tifffile import imread, imwrite
 from tqdm import tqdm
 
-from vollseg import CellPoseBackbone, CellPoseSegmenter, VollCellSeg
+from vollseg import (
+    CellPoseBackbone,
+    CellPoseSegmenter,
+    VollCellSeg,
+    ensure_cellpose_checkpoint,
+)
 
 from scenarios import SegmentScenario
 
@@ -31,12 +36,22 @@ ConfigStore.instance().store(name="SegmentScenario", node=SegmentScenario)
 
 def _build_cellpose(config: SegmentScenario) -> CellPoseSegmenter:
     mp = config.model_paths
-    backbone = CellPoseBackbone(
-        model_dir=mp.cellpose_model_dir if mp.cellpose_membrane_model_name else None,
-        model_name=mp.cellpose_membrane_model_name,
-        model_type=mp.cellpose_membrane_model_type,
-        gpu=config.parameters.cellpose_gpu,
-    )
+
+    # Local checkpoint path takes precedence; HF auto-download triggers
+    # only if a model_name is set (not a built-in like "cyto3").
+    if mp.cellpose_membrane_model_name:
+        ckpt = ensure_cellpose_checkpoint(
+            mp.cellpose_model_dir, mp.cellpose_membrane_model_name
+        )
+        backbone = CellPoseBackbone(
+            model_path=str(ckpt),
+            gpu=config.parameters.cellpose_gpu,
+        )
+    else:
+        backbone = CellPoseBackbone(
+            model_type=mp.cellpose_membrane_model_type,
+            gpu=config.parameters.cellpose_gpu,
+        )
     p = config.parameters
     return CellPoseSegmenter(
         backbone,

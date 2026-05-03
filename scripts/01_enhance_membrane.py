@@ -23,6 +23,7 @@ from vollseg import (
     CAREBackboneKeras,
     CAREDenoiser,
     CAREDenoiserKeras,
+    ensure_model,
 )
 
 from scenarios import SegmentScenario
@@ -46,7 +47,8 @@ def _build_denoiser(config: SegmentScenario):
             n_tiles=list(p.n_tiles),
             tile_overlap=p.pt_tile_overlap,
         )
-    # Keras fallback for legacy .h5 weights.
+    # Keras fallback for legacy .h5 weights — auto-fetch from HF if missing.
+    ensure_model(mp.care_model_dir, mp.care_membrane_model_name)
     backbone = CAREBackboneKeras(
         config=None,
         name=mp.care_membrane_model_name,

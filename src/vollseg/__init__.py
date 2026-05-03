@@ -27,6 +27,7 @@ from ._backbones import (
     CAREBackbone,
     CellPoseBackbone,
     MaskUNetBackbone,
+    StarDistBackbone,
     UNetBackbone,
     # Keras legacy
     CAREBackboneKeras,
@@ -41,6 +42,7 @@ from .models import (
     CAREDenoiser,
     CellPoseSegmenter,
     MaskUNetSegmenter,
+    StarDistSegmenter,
     UNetSegmenter,
     # Keras legacy
     CAREDenoiserKeras,
@@ -59,6 +61,7 @@ from .pipelines import (
     VollCellSeg,
     VollSeg,
 )
+from .hub import XENOPUS_MODELS, ensure_cellpose_checkpoint, ensure_model, hf_repo_for
 from .pretrained import (
     clear_models_and_aliases,
     get_registered_models,
@@ -72,6 +75,7 @@ __all__ = [
     "CAREDenoiser",
     "UNetSegmenter",
     "MaskUNetSegmenter",
+    "StarDistSegmenter",
     "CellPoseSegmenter",
     # Layer 1 — keras legacy
     "CAREDenoiserKeras",
@@ -98,6 +102,7 @@ __all__ = [
     "CAREBackbone",
     "UNetBackbone",
     "MaskUNetBackbone",
+    "StarDistBackbone",
     "CellPoseBackbone",
     # backbones — keras
     "CAREBackboneKeras",
@@ -110,6 +115,11 @@ __all__ = [
     "register_aliases",
     "get_registered_models",
     "clear_models_and_aliases",
+    # HuggingFace hub
+    "XENOPUS_MODELS",
+    "ensure_model",
+    "ensure_cellpose_checkpoint",
+    "hf_repo_for",
 ]
 
 

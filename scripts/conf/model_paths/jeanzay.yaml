@@ -22,6 +22,8 @@ care_membrane_checkpoint: null
 unet_nuclei_checkpoint: null
 roi_nuclei_checkpoint: null
 
-# Pick ONE of these two for membrane CellPose:
-cellpose_membrane_model_name: "xenopus_membrane_cellpose_3D_litest"
+# Pick ONE of these two for membrane CellPose. Only `mem_mneongreen` is
+# wired up to auto-download from HuggingFace — the cellpose3D variants
+# are not part of the public model zoo.
+cellpose_membrane_model_name: "mem_mneongreen"
 cellpose_membrane_model_type: null    # set to e.g. "cyto3" to use a built-in instead

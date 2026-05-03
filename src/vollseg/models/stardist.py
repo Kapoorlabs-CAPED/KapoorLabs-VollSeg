@@ -1,0 +1,107 @@
+"""StarDist Layer-1 singleton — first-class PyTorch implementation.
+
+Wraps :class:`StarDistBackbone` and exposes the same
+:meth:`Pipeline.predict(image) -> Result` contract every other singleton
+implements, so the Layer-2 composites (``UNetStarDistPipeline``,
+``ROIPipeline``, ``DenoisedPipeline``, …) and the
+:class:`vollseg.VollSeg.from_models` factory work unchanged.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import List, Optional, Tuple, Union
+
+import numpy as np
+
+from .._backbones.stardist import StarDistBackbone
+from ..pipelines.base import Result
+from ..stardist.inference import predict_volume
+
+
+class StarDistSegmenter:
+    """Run a PyTorch StarDist model and return instance labels.
+
+    Parameters
+    ----------
+    backbone
+        A :class:`StarDistBackbone` with weights loaded.
+    prob_thresh, nms_thresh, min_distance
+        Thresholds passed to :func:`vollseg.stardist.predict_volume`.
+    n_tiles, tile_overlap, batch_size, num_workers, pmin, pmax, device
+        Forwarded to the inference loop; same meanings as in
+        :class:`vollseg.CAREDenoiser`.
+    """
+
+    def __init__(
+        self,
+        backbone: StarDistBackbone,
+        *,
+        prob_thresh: float = 0.5,
+        nms_thresh: float = 0.4,
+        min_distance: int = 2,
+        n_tiles: Optional[List[int]] = None,
+        tile_overlap: float = 0.125,
+        batch_size: int = 4,
+        num_workers: int = 0,
+        pmin: Optional[float] = 0.1,
+        pmax: Optional[float] = 99.9,
+        device: Optional[str] = None,
+    ):
+        self.backbone = backbone
+        self.prob_thresh = float(prob_thresh)
+        self.nms_thresh = float(nms_thresh)
+        self.min_distance = int(min_distance)
+        self.n_tiles = list(n_tiles) if n_tiles is not None else [1, 4, 4]
+        self.tile_overlap = float(tile_overlap)
+        self.batch_size = int(batch_size)
+        self.num_workers = int(num_workers)
+        self.pmin = pmin
+        self.pmax = pmax
+        self.device = device
+
+    @classmethod
+    def from_checkpoint(
+        cls,
+        checkpoint: Union[str, Path],
+        *,
+        rays: np.ndarray,
+        **kwargs,
+    ) -> "StarDistSegmenter":
+        """Build directly from a Lightning ``.ckpt`` plus the rays array."""
+        backbone_kwargs = {
+            k: kwargs.pop(k)
+            for k in (
+                "conv_dims", "in_channels", "depth",
+                "num_channels_init", "use_batch_norm", "map_location",
+            )
+            if k in kwargs
+        }
+        backbone = StarDistBackbone.from_checkpoint(checkpoint, rays=rays, **backbone_kwargs)
+        return cls(backbone, **kwargs)
+
+    def predict(
+        self,
+        image: np.ndarray,
+        *,
+        prob_thresh: Optional[float] = None,
+        nms_thresh: Optional[float] = None,
+        n_tiles: Optional[Tuple[int, ...]] = None,
+        **_ignored,
+    ) -> Result:
+        sd = predict_volume(
+            self.backbone.module,
+            image,
+            self.backbone.rays,
+            prob_thresh=prob_thresh if prob_thresh is not None else self.prob_thresh,
+            nms_thresh=nms_thresh if nms_thresh is not None else self.nms_thresh,
+            min_distance=self.min_distance,
+            n_tiles=n_tiles if n_tiles is not None else self.n_tiles,
+            tile_overlap=self.tile_overlap,
+            batch_size=self.batch_size,
+            num_workers=self.num_workers,
+            pmin=self.pmin,
+            pmax=self.pmax,
+            device=self.device,
+        )
+        return Result(labels=sd.labels, probability=sd.prob_map)

@@ -35,6 +35,7 @@ from vollseg import (
     CellPoseSegmenter,
     NucleiSeededCellPosePipeline,
     cellpose_watershed_fuse,
+    ensure_cellpose_checkpoint,
 )
 
 from scenarios import SegmentScenario
@@ -45,12 +46,19 @@ ConfigStore.instance().store(name="SegmentScenario", node=SegmentScenario)
 
 def _build_cellpose(config: SegmentScenario) -> CellPoseSegmenter:
     mp = config.model_paths
-    backbone = CellPoseBackbone(
-        model_dir=mp.cellpose_model_dir if mp.cellpose_membrane_model_name else None,
-        model_name=mp.cellpose_membrane_model_name,
-        model_type=mp.cellpose_membrane_model_type,
-        gpu=config.parameters.cellpose_gpu,
-    )
+    if mp.cellpose_membrane_model_name:
+        ckpt = ensure_cellpose_checkpoint(
+            mp.cellpose_model_dir, mp.cellpose_membrane_model_name
+        )
+        backbone = CellPoseBackbone(
+            model_path=str(ckpt),
+            gpu=config.parameters.cellpose_gpu,
+        )
+    else:
+        backbone = CellPoseBackbone(
+            model_type=mp.cellpose_membrane_model_type,
+            gpu=config.parameters.cellpose_gpu,
+        )
     p = config.parameters
     return CellPoseSegmenter(
         backbone,
