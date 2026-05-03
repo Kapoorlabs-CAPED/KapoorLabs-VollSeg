@@ -1,14 +1,28 @@
-"""Training harnesses — separated from inference singletons.
+"""Training harnesses — PyTorch first-class, keras legacy.
 
-Each trainer's job is to *produce* a backbone (saved on disk under a
-chosen ``model_dir/model_name``). The trained backbone can then be
-wrapped in the corresponding :mod:`vollseg.models` singleton for
-inference, or registered as a pretrained model.
+Bare-named: PyTorch Lightning trainers built on the careamics UNet.
+``*Keras`` suffix: original csbdeep / stardist trainers, kept around for
+existing pipelines.
 """
 
 from .care import CARETrainer
-from .smartseeds import SmartSeeds
-from .stardist import StarDistTrainer
+from .care_keras import CARETrainerKeras
+from .cellpose import CellPoseTrainer
+from .maskunet import MaskUNetTrainer
+from .smartseeds_keras import SmartSeedsKeras
+from .stardist_keras import StarDistTrainerKeras
 from .unet import UNetTrainer
+from .unet_keras import UNetTrainerKeras
 
-__all__ = ["CARETrainer", "UNetTrainer", "StarDistTrainer", "SmartSeeds"]
+__all__ = [
+    # PyTorch first-class
+    "CARETrainer",
+    "UNetTrainer",
+    "MaskUNetTrainer",
+    "CellPoseTrainer",
+    # Keras legacy / no-pytorch-counterpart-yet
+    "CARETrainerKeras",
+    "UNetTrainerKeras",
+    "StarDistTrainerKeras",
+    "SmartSeedsKeras",
+]

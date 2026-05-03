@@ -1,12 +1,17 @@
-from csbdeep.models import CARE as _CSBDeepCARE
+"""PyTorch MaskUNet backbone — same careamics UNet, separate name for separate weights.
+
+Architecturally identical to :class:`UNetBackbone` (same single-output
+binary segmentation shape); kept as its own class only so Lightning
+checkpoints stay typed by *intent* (mask vs. semantic). The Layer-1
+:class:`vollseg.MaskUNetSegmenter` post-processes the same way as the
+plain U-Net.
+"""
+
+from __future__ import annotations
+
+from .unet import UNetBackbone
 
 
-class MaskUNetBackbone(_CSBDeepCARE):
-    """U-Net variant whose final layer produces both segmentation + mask outputs.
-
-    Same csbdeep CARE base as :class:`UNetBackbone`; kept as a separate
-    class so that pretrained weights register under their own key.
-    """
-
-    def __init__(self, config, name=None, basedir="."):
-        super(_CSBDeepCARE, self).__init__(config=config, name=name, basedir=basedir)
+class MaskUNetBackbone(UNetBackbone):
+    """Alias of :class:`UNetBackbone` — exists for naming discipline."""
+    pass

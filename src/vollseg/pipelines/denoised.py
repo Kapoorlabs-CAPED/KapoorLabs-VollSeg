@@ -6,7 +6,6 @@ from typing import Optional
 
 import numpy as np
 
-from ..models.care import CAREDenoiser
 from .base import Pipeline, Result
 
 
@@ -18,7 +17,7 @@ class DenoisedPipeline:
     can inspect or save it.
     """
 
-    def __init__(self, care: CAREDenoiser, downstream: Pipeline):
+    def __init__(self, care: Pipeline, downstream: Pipeline):
         if not isinstance(care, Pipeline):
             raise TypeError(f"care must be a Pipeline, got {type(care).__name__}")
         if not isinstance(downstream, Pipeline):

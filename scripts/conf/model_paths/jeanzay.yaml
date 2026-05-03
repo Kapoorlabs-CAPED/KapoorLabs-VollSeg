@@ -1,0 +1,27 @@
+# Model directories on the JeanZay HPC. Override per environment by
+# creating e.g. conf/model_paths/local.yaml and selecting it via:
+#   python scripts/01_nuclei_segmentation.py model_paths=local
+
+base_dir: "/lustre/fsn1/projects/rech/jsy/uzj81mi/Mari_Models/"
+star_model_dir: "/lustre/fsn1/projects/rech/jsy/uzj81mi/Mari_Models/StarDist3D/"
+unet_model_dir: "/lustre/fsn1/projects/rech/jsy/uzj81mi/Mari_Models/Unet3D/"
+roi_model_dir:  "/lustre/fsn1/projects/rech/jsy/uzj81mi/Mari_Models/MASKUNET/"
+care_model_dir: "/lustre/fsn1/projects/rech/jsy/uzj81mi/Mari_Models/CARE/"
+cellpose_model_dir: "/lustre/fsn1/projects/rech/jsy/uzj81mi/Mari_Models/CellPose3D/"
+
+star_nuclei_model_name: "nuclei_xenopus_mari"
+unet_nuclei_model_name: "unet_nuclei_xenopus_mari"
+roi_nuclei_model_name:  "unet_roi_nuclei_xenopus"
+care_membrane_model_name: "membrane_edge_enhancement"
+
+# PyTorch Lightning .ckpt files. When set, the bare-named PyTorch
+# CAREDenoiser / UNetSegmenter / MaskUNetSegmenter classes are used.
+# Leave as null to fall back to the keras *.h5 weights under
+# {care|unet|roi}_model_dir/{name}.
+care_membrane_checkpoint: null
+unet_nuclei_checkpoint: null
+roi_nuclei_checkpoint: null
+
+# Pick ONE of these two for membrane CellPose:
+cellpose_membrane_model_name: "xenopus_membrane_cellpose_3D_litest"
+cellpose_membrane_model_type: null    # set to e.g. "cyto3" to use a built-in instead

@@ -1,7 +1,10 @@
-"""StarDist instance segmentation singleton.
+"""StarDist singleton (keras / stardist) — current first-class for instance seg.
 
-Dispatches to a 2D or 3D backbone based on ``image.ndim`` — there is no
-parallel ``StarDist2DSegmenter`` / ``StarDist3DSegmenter`` class tree.
+A PyTorch StarDist is planned; until then this remains the canonical
+StarDist class. The ``Keras`` suffix is kept for parity with the other
+keras backbones, but no PyTorch ``StarDistSegmenter`` exists yet — code
+that needs StarDist should import :class:`StarDistSegmenterKeras`
+directly.
 """
 
 from __future__ import annotations
@@ -10,25 +13,15 @@ from typing import Optional, Union
 
 import numpy as np
 
-from .._backbones import StarDist2DBackbone, StarDist3DBackbone
+from .._backbones.stardist_keras import StarDist2DBackboneKeras, StarDist3DBackboneKeras
 from ..pipelines.base import Result, infer_axes
 
 
-_StarDistAny = Union[StarDist2DBackbone, StarDist3DBackbone]
+_StarDistAny = Union[StarDist2DBackboneKeras, StarDist3DBackboneKeras]
 
 
-class StarDistSegmenter:
-    """Run a StarDist model and return instance labels + polygon details.
-
-    Parameters
-    ----------
-    backbone
-        A trained :class:`StarDist2DBackbone` or :class:`StarDist3DBackbone`.
-        The class is inspected at construction to pick the right ``predict_*``
-        call later — there is no runtime dispatch cost.
-    prob_thresh, nms_thresh
-        Defaults forwarded to ``predict_instances`` (per-call kwargs override).
-    """
+class StarDistSegmenterKeras:
+    """Run a StarDist model and return instance labels + polygon details."""
 
     def __init__(
         self,
@@ -42,9 +35,11 @@ class StarDistSegmenter:
         self.nms_thresh = nms_thresh
 
     @classmethod
-    def from_pretrained(cls, name_or_alias: str, *, ndim: int = 3, **kwargs) -> "StarDistSegmenter":
+    def from_pretrained(
+        cls, name_or_alias: str, *, ndim: int = 3, **kwargs
+    ) -> "StarDistSegmenterKeras":
         from ..pretrained import get_model_instance
-        bb_cls = StarDist3DBackbone if ndim == 3 else StarDist2DBackbone
+        bb_cls = StarDist3DBackboneKeras if ndim == 3 else StarDist2DBackboneKeras
         return cls(get_model_instance(bb_cls, name_or_alias), **kwargs)
 
     def predict(

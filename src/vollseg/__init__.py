@@ -1,14 +1,20 @@
 """VollSeg — hierarchical, composable biological-image segmentation.
 
-Public API:
+Two backends coexist:
 
-- Layer 1 singletons: :class:`CAREDenoiser`, :class:`UNetSegmenter`,
-  :class:`StarDistSegmenter`.
-- Layer 2 composites: :class:`UNetStarDistPipeline`,
-  :class:`DenoisedPipeline`, :class:`ROIPipeline`, :class:`Chunked`.
-- Layer 3 factory: :class:`VollSeg.from_models`.
-- Shared types: :class:`Pipeline`, :class:`Result`.
-- Backbones (rarely needed directly): :mod:`vollseg._backbones`.
+- **PyTorch + Lightning + careamics** is the first-class backend. Bare
+  names (``CAREDenoiser``, ``UNetSegmenter``, ``MaskUNetSegmenter``)
+  point here.
+- **csbdeep / stardist (keras)** remains supported for already-trained
+  weights. Names carry a ``Keras`` suffix
+  (``CAREDenoiserKeras``, ``UNetSegmenterKeras``,
+  ``MaskUNetSegmenterKeras``, ``StarDistSegmenterKeras``).
+  ``StarDistSegmenterKeras`` has no PyTorch counterpart yet.
+
+Both kinds of singletons satisfy the :class:`Pipeline` protocol, so
+Layer 2 composites (``DenoisedPipeline`` etc.) and Layer 3 factories
+(``VollSeg.from_models``, ``VollCellSeg.from_models``) compose either or
+both seamlessly.
 """
 
 try:
@@ -17,26 +23,40 @@ except ImportError:
     __version__ = "unknown"
 
 from ._backbones import (
+    # PyTorch first-class
     CAREBackbone,
+    CellPoseBackbone,
     MaskUNetBackbone,
-    StarDist2DBackbone,
-    StarDist3DBackbone,
     UNetBackbone,
+    # Keras legacy
+    CAREBackboneKeras,
+    MaskUNetBackboneKeras,
+    StarDist2DBackboneKeras,
+    StarDist3DBackboneKeras,
+    UNetBackboneKeras,
 )
-from .fusion import watershed_fuse
+from .fusion import cellpose_watershed_fuse, watershed_fuse
 from .models import (
+    # PyTorch first-class
     CAREDenoiser,
+    CellPoseSegmenter,
     MaskUNetSegmenter,
-    StarDistSegmenter,
     UNetSegmenter,
+    # Keras legacy
+    CAREDenoiserKeras,
+    MaskUNetSegmenterKeras,
+    StarDistSegmenterKeras,
+    UNetSegmenterKeras,
 )
 from .pipelines import (
     Chunked,
     DenoisedPipeline,
+    NucleiSeededCellPosePipeline,
     Pipeline,
     ROIPipeline,
     Result,
     UNetStarDistPipeline,
+    VollCellSeg,
     VollSeg,
 )
 from .pretrained import (
@@ -48,30 +68,43 @@ from .pretrained import (
 from .seedpool import SeedPool, UnetStarMask
 
 __all__ = [
-    # Layer 1
+    # Layer 1 — PyTorch first-class
     "CAREDenoiser",
     "UNetSegmenter",
     "MaskUNetSegmenter",
-    "StarDistSegmenter",
+    "CellPoseSegmenter",
+    # Layer 1 — keras legacy
+    "CAREDenoiserKeras",
+    "UNetSegmenterKeras",
+    "MaskUNetSegmenterKeras",
+    "StarDistSegmenterKeras",
     # Layer 2
     "UNetStarDistPipeline",
+    "NucleiSeededCellPosePipeline",
     "DenoisedPipeline",
     "ROIPipeline",
     "Chunked",
     # Layer 3
     "VollSeg",
+    "VollCellSeg",
     # shared
     "Pipeline",
     "Result",
     "watershed_fuse",
+    "cellpose_watershed_fuse",
     "SeedPool",
     "UnetStarMask",
-    # backbones
+    # backbones — PyTorch
     "CAREBackbone",
     "UNetBackbone",
     "MaskUNetBackbone",
-    "StarDist2DBackbone",
-    "StarDist3DBackbone",
+    "CellPoseBackbone",
+    # backbones — keras
+    "CAREBackboneKeras",
+    "UNetBackboneKeras",
+    "MaskUNetBackboneKeras",
+    "StarDist2DBackboneKeras",
+    "StarDist3DBackboneKeras",
     # registry
     "register_model",
     "register_aliases",
@@ -81,104 +114,108 @@ __all__ = [
 
 
 # --- Pretrained Zenodo registry -------------------------------------------
-# Same URLs and hashes as the original VollSeg, but keyed by the new
-# backbone classes so existing notebooks can ``from_pretrained(...)``.
+# Existing pretrained weights are csbdeep / stardist (keras) checkpoints
+# only — the ``*Keras`` backbones can load them via ``from_pretrained``.
+# PyTorch checkpoints distributed in the future will be registered against
+# the PyTorch backbones the same way.
+
 clear_models_and_aliases(
-    StarDist2DBackbone, StarDist3DBackbone, UNetBackbone, MaskUNetBackbone, CAREBackbone
+    StarDist2DBackboneKeras, StarDist3DBackboneKeras,
+    UNetBackboneKeras, MaskUNetBackboneKeras, CAREBackboneKeras,
 )
 
 register_model(
-    CAREBackbone,
+    CAREBackboneKeras,
     "Denoise_3D_cells",
     "https://zenodo.org/record/6671170/files/GenericDenoising3D.zip",
     "a0eb25ffd794e2b3b31a4de5b72a392f",
 )
 register_model(
-    CAREBackbone,
+    CAREBackboneKeras,
     "Denoise_carcinoma",
     "https://zenodo.org/record/5910645/files/denoise_carcinoma.zip",
     "fd33199738f0b17761272118cbffdf04",
 )
 register_model(
-    UNetBackbone,
+    UNetBackboneKeras,
     "Embryo Cell Model (3D)",
     "https://zenodo.org/record/6337699/files/embryo_cell_model.zip",
     "c84fdec38a5b3cc6c1869c94ff23f3ba",
 )
 register_model(
-    UNetBackbone,
+    UNetBackboneKeras,
     "Xenopus Tissue (2D)",
     "https://zenodo.org/record/6060378/files/Xenopus_tissue_model.zip",
     "2694d8b05fa828aceb055eef8cd5ca1f",
 )
 register_model(
-    StarDist2DBackbone,
+    StarDist2DBackboneKeras,
     "White_Blood_Cells",
     "https://zenodo.org/record/5815521/files/WBCSeg.zip",
     "7889f5902d8562766a4dee2726c90d49",
 )
 register_model(
-    StarDist3DBackbone,
+    StarDist3DBackboneKeras,
     "Carcinoma_cells",
     "https://zenodo.org/record/6354077/files/carcinoma_stardist.zip",
     "b92b9d5347862e52279629be575fe0b7",
 )
 register_model(
-    UNetBackbone,
+    UNetBackboneKeras,
     "Microtubule Kymograph Segmentation",
     "https://zenodo.org/record/6355705/files/microtubule_kymograph_segmentation.zip",
     "a42fcd4ba732734d36eda3dbbb3d5673",
 )
 register_model(
-    UNetBackbone,
+    UNetBackboneKeras,
     "Unet_White_Blood_Cells",
     "https://zenodo.org/record/5815588/files/UNETWBC.zip",
     "9645f004db478f661811d6da615ccc0b",
 )
 register_model(
-    UNetBackbone,
+    UNetBackboneKeras,
     "Unet_Arabidopsis",
     "https://zenodo.org/record/6670747/files/Unet_Arabidopsis.zip",
     "ed7bdead6ebb11c3e13c22a156288f60",
 )
 register_model(
-    UNetBackbone,
+    UNetBackboneKeras,
     "Unet_Cyto_White_Blood_Cells",
     "https://zenodo.org/record/5815603/files/UNETcytoWBC.zip",
     "dd3bf8b8e2a04536144954e882445a5e",
 )
 register_model(
-    UNetBackbone,
+    UNetBackboneKeras,
     "Unet_Lung_Segmentation",
     "https://zenodo.org/record/6060177/files/Montgomery_county.zip",
     "be41937a00693e28961358440d242417",
 )
 register_model(
-    MaskUNetBackbone,
+    MaskUNetBackboneKeras,
     "Xenopus_Cell_Tissue_Segmentation",
     "https://zenodo.org/record/6060378/files/Xenopus_tissue_model.zip",
     "2694d8b05fa828aceb055eef8cd5ca1f",
 )
 register_model(
-    MaskUNetBackbone,
+    MaskUNetBackboneKeras,
     "Unet_Arabidopsis_Mask",
     "https://zenodo.org/record/6670732/files/Unet_Arabidopsis_Mask.zip",
     "114df78e0153b39d80d0253a4dcc236f",
 )
 
-register_aliases(UNetBackbone, "Embryo Cell Model (3D)", "Embryo Cell Model (3D)")
-register_aliases(StarDist2DBackbone, "White_Blood_Cells", "White_Blood_Cells")
-register_aliases(StarDist3DBackbone, "Carcinoma_cells", "Carcinoma_cells")
-register_aliases(UNetBackbone, "Unet_White_Blood_Cells", "Unet_White_Blood_Cells")
-register_aliases(UNetBackbone, "Unet_Cyto_White_Blood_Cells", "Unet_Cyto_White_Blood_Cells")
+register_aliases(UNetBackboneKeras, "Embryo Cell Model (3D)", "Embryo Cell Model (3D)")
+register_aliases(StarDist2DBackboneKeras, "White_Blood_Cells", "White_Blood_Cells")
+register_aliases(StarDist3DBackboneKeras, "Carcinoma_cells", "Carcinoma_cells")
+register_aliases(UNetBackboneKeras, "Unet_White_Blood_Cells", "Unet_White_Blood_Cells")
+register_aliases(UNetBackboneKeras, "Unet_Cyto_White_Blood_Cells", "Unet_Cyto_White_Blood_Cells")
 register_aliases(
-    UNetBackbone, "Microtubule Kymograph Segmentation", "Microtubule Kymograph Segmentation"
+    UNetBackboneKeras, "Microtubule Kymograph Segmentation", "Microtubule Kymograph Segmentation"
 )
-register_aliases(UNetBackbone, "Xenopus Tissue (2D)", "Xenopus Tissue (2D)")
-register_aliases(UNetBackbone, "Unet_Lung_Segmentation", "Unet_Lung_Segmentation")
-register_aliases(UNetBackbone, "Unet_Arabidopsis", "Unet_Arabidopsis")
+register_aliases(UNetBackboneKeras, "Xenopus Tissue (2D)", "Xenopus Tissue (2D)")
+register_aliases(UNetBackboneKeras, "Unet_Lung_Segmentation", "Unet_Lung_Segmentation")
+register_aliases(UNetBackboneKeras, "Unet_Arabidopsis", "Unet_Arabidopsis")
 register_aliases(
-    MaskUNetBackbone, "Xenopus_Cell_Tissue_Segmentation", "Xenopus_Cell_Tissue_Segmentation"
+    MaskUNetBackboneKeras, "Xenopus_Cell_Tissue_Segmentation", "Xenopus_Cell_Tissue_Segmentation"
 )
-register_aliases(MaskUNetBackbone, "Unet_Arabidopsis_Mask", "Unet_Arabidopsis_Mask")
-register_aliases(CAREBackbone, "Denoise_3D_cells", "Denoise_3D_cells")
+register_aliases(MaskUNetBackboneKeras, "Unet_Arabidopsis_Mask", "Unet_Arabidopsis_Mask")
+register_aliases(CAREBackboneKeras, "Denoise_3D_cells", "Denoise_3D_cells")

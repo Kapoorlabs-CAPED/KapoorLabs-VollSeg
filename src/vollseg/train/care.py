@@ -1,32 +1,41 @@
-"""CARE denoising trainer."""
+"""CARE denoising trainer — first-class PyTorch implementation.
+
+A leaner reflection of the kapoorlabs-lightning ``CareInception``
+orchestrator, but self-contained: builds the careamics UNet, wires up
+:class:`CareModule`, and hands them to a Lightning ``Trainer``. The user
+brings their own ``LightningDataModule`` (or a pair of DataLoaders) so
+that this trainer doesn't lock anyone into a specific data layout.
+"""
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
-from typing import Optional, Tuple, Union
+from typing import Any, Optional, Union
 
-from csbdeep.models import Config
+import torch
+import torch.nn as nn
 
-from .._backbones import CAREBackbone
-from ._checkpoint import load_latest_checkpoint
+from .._backbones.care import _build_unet
+from .._lightning.care_module import CareModule
 
 
 class CARETrainer:
-    """Train a CARE denoising network.
+    """Train a CARE denoising model under PyTorch Lightning.
 
     Parameters
     ----------
     model_name, model_dir
-        Where the trained model is saved.
-    axes, n_channel_in, n_channel_out
-        Axes string and channel counts for csbdeep ``Config``.
+        Where checkpoints + the hyperparameter JSON are written.
     epochs, batch_size, learning_rate
         Standard training knobs.
-    unet_n_depth, unet_n_first, unet_kern_size
-        U-Net architecture.
-    train_loss
-        Loss name accepted by csbdeep (default: ``mae``).
+    unet_depth, num_channels_init, use_batch_norm
+        UNet architecture (passed to ``careamics.models.unet.UNet``).
+    n_tiles, tile_overlap
+        Forwarded to :class:`CareModule` for inference-time tiling.
+    accelerator, devices, precision, strategy
+        Forwarded to ``lightning.Trainer``.
     """
 
     def __init__(
@@ -34,53 +43,107 @@ class CARETrainer:
         *,
         model_name: str,
         model_dir: Union[str, Path],
-        axes: str = "ZYXC",
-        n_channel_in: int = 1,
-        n_channel_out: int = 1,
-        epochs: int = 400,
-        batch_size: int = 4,
-        learning_rate: float = 1e-4,
-        unet_n_depth: int = 3,
-        unet_n_first: int = 48,
-        unet_kern_size: int = 3,
-        train_loss: str = "mae",
-        train_reduce_lr: dict = None,
+        epochs: int = 100,
+        batch_size: int = 16,
+        learning_rate: float = 4e-4,
+        # UNet architecture
+        conv_dims: int = 3,
+        in_channels: int = 1,
+        num_classes: int = 1,
+        unet_depth: int = 3,
+        num_channels_init: int = 64,
+        use_batch_norm: bool = True,
+        # CareModule prediction-time defaults
+        n_tiles: Optional[list] = None,
+        tile_overlap: float = 0.125,
+        # Lightning runtime
+        accelerator: str = "auto",
+        devices: Any = "auto",
+        precision: str = "32-true",
+        strategy: str = "auto",
+        loss_func: Optional[nn.Module] = None,
+        optim_factory: Optional[Any] = None,
     ):
         self.model_name = model_name
         self.model_dir = Path(model_dir)
-        self.config = Config(
-            axes,
-            n_channel_in,
-            n_channel_out,
-            unet_n_depth=unet_n_depth,
-            train_epochs=epochs,
-            train_batch_size=batch_size,
-            unet_n_first=unet_n_first,
-            train_loss=train_loss,
-            unet_kern_size=unet_kern_size,
-            train_learning_rate=learning_rate,
-            train_reduce_lr=train_reduce_lr or {"patience": 5, "factor": 0.5},
+        self.model_dir.mkdir(parents=True, exist_ok=True)
+        self.epochs = epochs
+        self.batch_size = batch_size
+        self.learning_rate = learning_rate
+
+        self.conv_dims = conv_dims
+        self.in_channels = in_channels
+        self.num_classes = num_classes
+        self.unet_depth = unet_depth
+        self.num_channels_init = num_channels_init
+        self.use_batch_norm = use_batch_norm
+
+        self.n_tiles = list(n_tiles) if n_tiles is not None else [1, 4, 4]
+        self.tile_overlap = tile_overlap
+        self.accelerator = accelerator
+        self.devices = devices
+        self.precision = precision
+        self.strategy = strategy
+
+        self.loss_func = loss_func or nn.MSELoss()
+        self.optim_factory = optim_factory or (
+            lambda params: torch.optim.Adam(params, lr=self.learning_rate)
         )
 
-    def fit(
-        self,
-        X,
-        Y=None,
-        *,
-        validation_data: Optional[Tuple] = None,
-        load_data_sequence: bool = False,
-    ):
-        """Train and return the keras history.
+    def fit(self, datamodule=None, *, train_dataloader=None, val_dataloader=None,
+            callbacks=None, logger=None):
+        """Train the model. Provide either ``datamodule`` or the two dataloaders."""
+        from lightning import Trainer
 
-        ``X`` and ``Y`` are paired arrays for the in-memory path; pass a
-        keras ``Sequence`` as ``X`` and set ``load_data_sequence=True`` for
-        the streaming path.
-        """
-        model = CAREBackbone(self.config, name=self.model_name, basedir=os.fspath(self.model_dir))
-        load_latest_checkpoint(model, self.model_dir, self.model_name)
-        history = model.train(
-            X, Y,
-            validation_data=validation_data,
-            load_data_sequence=load_data_sequence,
+        unet = _build_unet(
+            conv_dims=self.conv_dims,
+            in_channels=self.in_channels,
+            num_classes=self.num_classes,
+            depth=self.unet_depth,
+            num_channels_init=self.num_channels_init,
+            use_batch_norm=self.use_batch_norm,
         )
-        return history, model
+        module = CareModule(
+            network=unet,
+            loss_func=self.loss_func,
+            optim_func=self.optim_factory,
+            n_tiles=self.n_tiles,
+            tile_overlap=self.tile_overlap,
+        )
+
+        self._save_hparams()
+
+        trainer = Trainer(
+            max_epochs=self.epochs,
+            accelerator=self.accelerator,
+            devices=self.devices,
+            precision=self.precision,
+            strategy=self.strategy,
+            default_root_dir=os.fspath(self.model_dir),
+            callbacks=callbacks or [],
+            logger=logger,
+        )
+        if datamodule is not None:
+            trainer.fit(module, datamodule=datamodule)
+        else:
+            trainer.fit(module, train_dataloaders=train_dataloader,
+                        val_dataloaders=val_dataloader)
+        return trainer, module
+
+    def _save_hparams(self) -> None:
+        out = {
+            "conv_dims": self.conv_dims,
+            "in_channels": self.in_channels,
+            "num_classes": self.num_classes,
+            "unet_depth": self.unet_depth,
+            "num_channels_init": self.num_channels_init,
+            "use_batch_norm": self.use_batch_norm,
+            "n_tiles": self.n_tiles,
+            "tile_overlap": self.tile_overlap,
+            "learning_rate": self.learning_rate,
+            "batch_size": self.batch_size,
+            "epochs": self.epochs,
+            "model_name": self.model_name,
+        }
+        with open(self.model_dir / f"{self.model_name}.json", "w") as f:
+            json.dump(out, f, indent=2)

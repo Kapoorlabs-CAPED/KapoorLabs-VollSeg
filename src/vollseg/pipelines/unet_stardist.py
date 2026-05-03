@@ -7,8 +7,6 @@ from typing import Optional
 import numpy as np
 
 from ..fusion import watershed_fuse
-from ..models.stardist import StarDistSegmenter
-from ..models.unet import UNetSegmenter
 from .base import Pipeline, Result
 
 
@@ -27,8 +25,8 @@ class UNetStarDistPipeline:
 
     def __init__(
         self,
-        unet: UNetSegmenter,
-        stardist: StarDistSegmenter,
+        unet: Pipeline,
+        stardist: Pipeline,
         *,
         seedpool: bool = False,
     ):

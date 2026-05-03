@@ -10,9 +10,6 @@ from __future__ import annotations
 
 from typing import Optional, Tuple
 
-from ..models.care import CAREDenoiser
-from ..models.stardist import StarDistSegmenter
-from ..models.unet import UNetSegmenter
 from .base import Pipeline
 from .chunked import Chunked
 from .denoised import DenoisedPipeline
@@ -26,10 +23,10 @@ class VollSeg:
     @staticmethod
     def from_models(
         *,
-        care: Optional[CAREDenoiser] = None,
-        unet: Optional[UNetSegmenter] = None,
-        stardist: Optional[StarDistSegmenter] = None,
-        roi_unet: Optional[UNetSegmenter] = None,
+        care: Optional[Pipeline] = None,
+        unet: Optional[Pipeline] = None,
+        stardist: Optional[Pipeline] = None,
+        roi_unet: Optional[Pipeline] = None,
         seedpool: bool = False,
         chunk: Optional[Tuple[int, int, int]] = None,
         overlap: Tuple[int, int, int] = (0, 0, 0),

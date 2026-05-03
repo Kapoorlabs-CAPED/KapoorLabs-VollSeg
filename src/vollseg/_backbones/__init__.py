@@ -1,19 +1,30 @@
-"""Backbone classes — thin subclasses of csbdeep / stardist models.
+"""Backbones — first-class PyTorch + legacy keras siblings.
 
-These exist because csbdeep/stardist need a concrete class on disk to load
-weights from. They are not the user-facing API: see :mod:`vollseg.models`
-for the inference singletons that wrap them.
+The bare-named classes (``CAREBackbone``, ``UNetBackbone``,
+``MaskUNetBackbone``) are PyTorch + careamics + Lightning. The
+``*Keras`` variants wrap csbdeep / stardist for backwards compatibility
+with already-trained weights.
 """
 
 from .care import CAREBackbone
+from .care_keras import CAREBackboneKeras
+from .cellpose import CellPoseBackbone
 from .maskunet import MaskUNetBackbone
-from .stardist import StarDist2DBackbone, StarDist3DBackbone
+from .maskunet_keras import MaskUNetBackboneKeras
+from .stardist_keras import StarDist2DBackboneKeras, StarDist3DBackboneKeras
 from .unet import UNetBackbone
+from .unet_keras import UNetBackboneKeras
 
 __all__ = [
+    # PyTorch first-class
     "CAREBackbone",
     "UNetBackbone",
     "MaskUNetBackbone",
-    "StarDist2DBackbone",
-    "StarDist3DBackbone",
+    "CellPoseBackbone",
+    # Keras legacy
+    "CAREBackboneKeras",
+    "UNetBackboneKeras",
+    "MaskUNetBackboneKeras",
+    "StarDist2DBackboneKeras",
+    "StarDist3DBackboneKeras",
 ]

@@ -1,0 +1,6 @@
+include LICENSE
+include README.md
+prune dist
+prune scripts/_runs
+recursive-exclude * __pycache__
+recursive-exclude * *.py[co]

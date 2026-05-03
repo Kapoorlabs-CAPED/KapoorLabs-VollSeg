@@ -32,6 +32,12 @@ dependencies = [
     "scikit-image",
     "tifffile",
     "tqdm",
+    # PyTorch first-class backend
+    "torch",
+    "lightning",
+    "careamics",
+    # Keras legacy backend (StarDist still has no PyTorch port; keras
+    # CARE / U-Net classes also remain supported for existing weights).
     "csbdeep",
     "stardist",
 ]

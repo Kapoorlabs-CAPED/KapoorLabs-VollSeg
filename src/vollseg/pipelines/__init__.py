@@ -1,7 +1,9 @@
 from .base import Pipeline, Result, infer_axes
+from .cellseg_factory import VollCellSeg
 from .chunked import Chunked
 from .denoised import DenoisedPipeline
 from .factory import VollSeg
+from .nuclei_cellpose import NucleiSeededCellPosePipeline
 from .roi import ROIPipeline
 from .unet_stardist import UNetStarDistPipeline
 
@@ -13,5 +15,7 @@ __all__ = [
     "DenoisedPipeline",
     "ROIPipeline",
     "UNetStarDistPipeline",
+    "NucleiSeededCellPosePipeline",
     "VollSeg",
+    "VollCellSeg",
 ]

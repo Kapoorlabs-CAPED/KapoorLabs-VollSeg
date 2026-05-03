@@ -1,4 +1,9 @@
-"""StarDist trainer (2D + 3D, dispatched by ``ndim``)."""
+"""StarDist trainer (keras / stardist) — currently the only StarDist trainer.
+
+A PyTorch StarDist trainer is planned. Keeping the ``Keras`` suffix for
+parity with other backbones; switch to a bare ``StarDistTrainer`` when
+the PyTorch port lands.
+"""
 
 from __future__ import annotations
 
@@ -9,28 +14,12 @@ from typing import Optional, Sequence, Tuple, Union
 from stardist import Rays_GoldenSpiral, calculate_extents
 from stardist.models import Config2D, Config3D
 
-from .._backbones import StarDist2DBackbone, StarDist3DBackbone
+from .._backbones.stardist_keras import StarDist2DBackboneKeras, StarDist3DBackboneKeras
 from ._checkpoint import load_latest_checkpoint
 
 
-class StarDistTrainer:
-    """Train a StarDist 2D or 3D model.
-
-    Parameters
-    ----------
-    ndim
-        2 or 3 — selects between :class:`StarDist2DBackbone` and 3D backbone.
-    backbone
-        ``"resnet"`` or ``"unet"`` (StarDist's two backbone choices).
-    n_rays
-        StarDist ray count.
-    grid
-        StarDist grid (per-axis subsampling); pass ``(g_y, g_x)`` for 2D
-        or ``(g_z, g_y, g_x)`` for 3D.
-    anisotropy
-        Per-axis voxel anisotropy. If ``None`` (3D only) it's estimated
-        from the training labels at fit time.
-    """
+class StarDistTrainerKeras:
+    """Train a StarDist 2D or 3D model."""
 
     def __init__(
         self,
@@ -73,24 +62,16 @@ class StarDistTrainer:
         self.use_gpu = use_gpu
         self.train_dist_loss = train_dist_loss
 
-    def fit(
-        self,
-        X_trn,
-        Y_trn,
-        *,
-        validation_data: Optional[Tuple] = None,
-    ):
+    def fit(self, X_trn, Y_trn, *, validation_data: Optional[Tuple] = None):
         anisotropy, rays = self._anisotropy_and_rays(Y_trn)
         config = self._build_config(anisotropy, rays)
 
-        bb_cls = StarDist3DBackbone if self.ndim == 3 else StarDist2DBackbone
+        bb_cls = StarDist3DBackboneKeras if self.ndim == 3 else StarDist2DBackboneKeras
         model = bb_cls(config, name=self.model_name, basedir=os.fspath(self.model_dir))
         load_latest_checkpoint(model, self.model_dir, self.model_name)
 
         history = model.train(
-            X_trn, Y_trn,
-            validation_data=validation_data,
-            epochs=self.epochs,
+            X_trn, Y_trn, validation_data=validation_data, epochs=self.epochs
         )
         return history, model
 
@@ -105,7 +86,6 @@ class StarDistTrainer:
                 aniso = tuple(extents.max() / extents)
                 return aniso, Rays_GoldenSpiral(self.n_rays, anisotropy=aniso)
             except Exception:
-                # Y may be a Sequence — fall back to plain ray count
                 return None, self.n_rays
         return None, self.n_rays
 
@@ -134,7 +114,6 @@ class StarDistTrainer:
                 unet_kernel_size=(self.kern_size,) * self.ndim,
                 unet_n_filter_base=self.startfilter,
             )
-
         cfg_cls = Config3D if self.ndim == 3 else Config2D
         kwargs = dict(rays=rays, **common, **arch)
         if self.ndim == 3:

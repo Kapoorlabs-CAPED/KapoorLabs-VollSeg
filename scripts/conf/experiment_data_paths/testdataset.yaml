@@ -1,0 +1,14 @@
+base_directory: "/lustre/fsn1/projects/rech/jsy/uzj81mi/Mari_Data_Oneat/Mari_Division_Test_Dataset/"
+
+timelapse_nuclei_directory:      "nuclei_timelapses"
+timelapse_membrane_directory:    "membrane_timelapses"
+timelapse_seg_nuclei_directory:  "seg_nuclei_timelapses"
+timelapse_seg_membrane_directory: "seg_membrane_timelapses"
+timelapse_seg_vollcell_directory: "seg_vollcell_timelapses"
+membrane_enhanced_directory:     "membrane_enhanced"
+
+voxel_size_xyz: [0.6918, 0.6918, 2]
+
+# For 01_segmentation_metrics.py — leave null when not running metrics.
+metrics_ground_truth_directory: null
+metrics_results_directory: null

@@ -1,0 +1,44 @@
+# Segmentation runtime knobs. Override on the CLI with:
+#   python scripts/01_nuclei_segmentation.py parameters.use_seedpool=true
+
+file_type: "*.tif"
+axes: "ZYX"
+n_tiles: [2, 4, 4]
+
+channel_nuclei: 1
+channel_membrane: 0
+
+# Which Layer-2 wrappers to compose around the StarDist core.
+use_roi_unet: true        # wrap in ROIPipeline (roi_unet)
+use_seedpool: false       # fuse U-Net + StarDist via watershed
+use_care_denoise: false   # wrap in DenoisedPipeline (care)
+
+# Per-instance size / probability gating.
+min_size: 10
+min_size_mask: 10
+max_size: 10000
+prob_thresh: null         # null → use model defaults
+nms_thresh: null
+
+# CellPose runtime knobs (used by 01_membrane_segmentation_cellpose.py
+# and 01_vollcellpose_membrane_segmentation.py).
+cellpose_diameter: 34.6
+cellpose_flow_threshold: 1.0
+cellpose_cellprob_threshold: -1.0
+cellpose_stitch_threshold: 0.5
+cellpose_anisotropy: null
+cellpose_do_3d: false
+cellpose_gpu: true
+cellpose_channels: [0, 0]
+cellpose_bsize: 224
+
+# PyTorch backbone architecture (must match training-time values).
+pt_conv_dims: 3
+pt_in_channels: 1
+pt_num_classes: 1
+pt_unet_depth: 3
+pt_num_channels_init: 64
+pt_use_batch_norm: true
+pt_tile_overlap: 0.125
+
+save_name_prefix: "Result"

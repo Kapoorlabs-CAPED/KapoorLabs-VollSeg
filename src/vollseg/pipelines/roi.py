@@ -6,7 +6,6 @@ from typing import Optional
 
 import numpy as np
 
-from ..models.unet import UNetSegmenter
 from .base import Pipeline, Result
 
 
@@ -19,7 +18,7 @@ class ROIPipeline:
     ``semantic`` are zeroed outside the ROI.
     """
 
-    def __init__(self, roi_unet: UNetSegmenter, downstream: Pipeline):
+    def __init__(self, roi_unet: Pipeline, downstream: Pipeline):
         if not isinstance(roi_unet, Pipeline):
             raise TypeError(f"roi_unet must be a Pipeline, got {type(roi_unet).__name__}")
         if not isinstance(downstream, Pipeline):
