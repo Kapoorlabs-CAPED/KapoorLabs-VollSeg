@@ -1,17 +1,19 @@
 """Pretrained model registry — Zenodo-hosted weights keyed by class + name/alias.
 
-Ported from the original VollSeg unchanged in behavior; this is a stable
-contract with downstream notebooks.
+Imports of csbdeep / tensorflow are deferred to :func:`get_model_folder`
+so this module can be imported on PyTorch-only installs (where the
+``*Keras`` classes aren't usable but the registry data structures still
+serve as a static catalogue).
 """
 
 from collections import OrderedDict
+from pathlib import Path
 from warnings import warn
 
-from csbdeep.utils import _raise
-from csbdeep.utils.six import Path
-from csbdeep.utils.tf import keras_import
 
-get_file = keras_import("utils", "get_file")
+def _raise(err):
+    """Local fallback for csbdeep.utils._raise — raise the error eagerly."""
+    raise err
 
 
 _MODELS: dict = {}
@@ -102,6 +104,16 @@ def get_model_details(cls, key_or_alias, verbose=False):
 
 
 def get_model_folder(cls, key_or_alias):
+    # Lazy: csbdeep + tensorflow only needed when actually fetching weights.
+    try:
+        from csbdeep.utils.tf import keras_import
+    except ImportError as e:
+        raise ImportError(
+            "Fetching keras pretrained models requires the keras backend. "
+            "Install with `pip install kapoorlabs-vollseg[keras]`."
+        ) from e
+    get_file = keras_import("utils", "get_file")
+
     key, _alias, m = get_model_details(cls, key_or_alias)
     target = str(Path("models") / cls.__name__ / key)
     path = Path(

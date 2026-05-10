@@ -27,26 +27,36 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Image Processing",
 ]
 dependencies = [
+    # Core utilities.
     "numpy",
     "scipy",
     "scikit-image",
     "tifffile",
     "tqdm",
-    # PyTorch first-class backend
+    "h5py",
+    "huggingface_hub",
+    # PyTorch stack (first-class). All the bare-named singletons /
+    # composites / trainers depend on this; `cellpose` is also PyTorch.
     "torch",
     "lightning",
     "careamics",
-    # Auto-download of pretrained Xenopus models from HuggingFace.
-    "huggingface_hub",
-    # H5 storage for StarDist (and future) training data.
-    "h5py",
-    # Keras legacy backend (StarDist still has no PyTorch port; keras
-    # CARE / U-Net classes also remain supported for existing weights).
-    "csbdeep",
-    "stardist",
+    "cellpose",
 ]
 
 [project.optional-dependencies]
+# `pip install kapoorlabs-vollseg[pytorch]` — explicit alias of the default.
+# Empty marker since the PyTorch stack is already in `dependencies`.
+pytorch = []
+
+# `pip install kapoorlabs-vollseg[keras]` — adds the legacy csbdeep / stardist
+# backend (which transitively pulls in tensorflow). Required only if you
+# want to use the `*Keras` classes or load existing csbdeep `.h5` weights.
+keras = ["csbdeep", "stardist"]
+
+# Everything.
+all = ["csbdeep", "stardist"]
+
+# Dev / test extras.
 test = ["pytest", "pytest-cov"]
 dev = ["pytest", "pytest-cov", "ruff"]
 
