@@ -1,0 +1,4 @@
+defaults:
+  - _self_
+  - parameters: default
+  - train_data_paths: xenopus_jeanzay

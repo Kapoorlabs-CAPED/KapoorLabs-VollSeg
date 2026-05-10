@@ -20,7 +20,8 @@ us from materializing the prob map at prep time.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Iterator, Optional, Sequence, Tuple, Union
+from typing import Optional, Union
+from collections.abc import Iterator, Sequence
 
 import h5py
 import numpy as np
@@ -28,8 +29,8 @@ from tifffile import imread
 from tqdm import tqdm
 
 
-_PatchShape = Union[Tuple[int, int], Tuple[int, int, int]]
-_Stride = Union[Tuple[int, int], Tuple[int, int, int]]
+_PatchShape = Union[tuple[int, int], tuple[int, int, int]]
+_Stride = Union[tuple[int, int], tuple[int, int, int]]
 
 
 def generate_stardist_h5(
@@ -77,7 +78,11 @@ def generate_stardist_h5(
     if ndim not in (2, 3):
         raise ValueError(f"patch_shape must be length 2 or 3, got {patch_shape}")
 
-    stride_train = tuple(stride_train) if stride_train is not None else tuple(p // 2 for p in patch_shape)
+    stride_train = (
+        tuple(stride_train)
+        if stride_train is not None
+        else tuple(p // 2 for p in patch_shape)
+    )
     stride_val = tuple(stride_val) if stride_val is not None else tuple(patch_shape)
 
     pairs = _list_paired_files(raw_dir, label_dir, extensions)
@@ -97,15 +102,29 @@ def generate_stardist_h5(
         train_writer = _SplitWriter(f, "train", patch_shape, chunk_rows)
         val_writer = _SplitWriter(f, "val", patch_shape, chunk_rows)
 
-        for raw_path, label_path in tqdm(train_pairs, desc=f"train ({len(train_pairs)} files)"):
+        for raw_path, label_path in tqdm(
+            train_pairs, desc=f"train ({len(train_pairs)} files)"
+        ):
             counts["train"] += _emit_from_file(
-                raw_path, label_path, train_writer, patch_shape, stride_train,
-                ndim, min_foreground_ratio,
+                raw_path,
+                label_path,
+                train_writer,
+                patch_shape,
+                stride_train,
+                ndim,
+                min_foreground_ratio,
             )
-        for raw_path, label_path in tqdm(val_pairs, desc=f"val ({len(val_pairs)} files)"):
+        for raw_path, label_path in tqdm(
+            val_pairs, desc=f"val ({len(val_pairs)} files)"
+        ):
             counts["val"] += _emit_from_file(
-                raw_path, label_path, val_writer, patch_shape, stride_val,
-                ndim, min_foreground_ratio,
+                raw_path,
+                label_path,
+                val_writer,
+                patch_shape,
+                stride_val,
+                ndim,
+                min_foreground_ratio,
             )
 
     print(f"Wrote {counts['train']} train + {counts['val']} val patches → {output_h5}")
@@ -114,17 +133,20 @@ def generate_stardist_h5(
 
 # --------------------------------------------------------------- internals
 
+
 def _list_paired_files(raw_dir: Path, label_dir: Path, exts: Sequence[str]):
     raw_files = sorted(p for p in raw_dir.iterdir() if p.suffix in exts)
     pairs = []
-    for r in raw_files:
-        l = label_dir / r.name
-        if l.exists():
-            pairs.append((r, l))
+    for raw in raw_files:
+        label_path = label_dir / raw.name
+        if label_path.exists():
+            pairs.append((raw, label_path))
     return pairs
 
 
-def _iter_window_origins(volume_shape, patch_shape, stride) -> Iterator[Tuple[int, ...]]:
+def _iter_window_origins(
+    volume_shape, patch_shape, stride
+) -> Iterator[tuple[int, ...]]:
     starts_per_axis = []
     for v, p, s in zip(volume_shape, patch_shape, stride):
         if v < p:
@@ -150,7 +172,13 @@ def _slice_for_origin(origin, patch_shape):
 
 
 def _emit_from_file(
-    raw_path, label_path, writer, patch_shape, stride, ndim, min_fg_ratio,
+    raw_path,
+    label_path,
+    writer,
+    patch_shape,
+    stride,
+    ndim,
+    min_fg_ratio,
 ) -> int:
     raw_vol = imread(raw_path).astype(np.float32)
     label_vol = imread(label_path).astype(np.int32)

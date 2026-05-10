@@ -1,0 +1,21 @@
+# 3D U-Net data-gen knobs. Override on CLI:
+#   python generate-unet-training-data.py parameters.patch_shape=[8,128,128]
+patch_shape: [16, 256, 256]
+val_files: 1
+
+# SmartPatches: foreground patches centered on each instance, kept only if
+# the foreground voxel fraction lies in [lower, upper].
+lower_ratio_fore_to_back: 0.05
+upper_ratio_fore_to_back: 1.0
+erosion_iterations: 0
+max_foreground_patches_per_image: .inf
+
+# Background-paste augmentation: composite each cell onto a patch centered
+# on a background voxel (raw_aug = raw_bg + raw_fg, label_aug = label_fg).
+# Trains the network to be robust to background appearance.
+paste_augmentation: true
+max_paste_patches_per_image: 200
+
+seed: 42
+overwrite: false
+file_type: "*.tif"

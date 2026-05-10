@@ -11,6 +11,7 @@ from .care_module import CareModule
 from .dataset import CarePredictionDataset, compute_tile_shape
 from .stitch import stitch_tiles
 from .transforms import PercentileNormalize, ToFloat32
+from .unet_dataset import H5UNetDataset, unet_collate
 
 __all__ = [
     "BaseModule",
@@ -20,4 +21,6 @@ __all__ = [
     "stitch_tiles",
     "PercentileNormalize",
     "ToFloat32",
+    "H5UNetDataset",
+    "unet_collate",
 ]

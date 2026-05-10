@@ -1,0 +1,4 @@
+base_data_dir: "/lustre/fsn1/projects/rech/jsy/uzj81mi/Mari_Data_Training/xenopus"
+h5_file: "h5/xenopus_train.h5"
+log_path: "/lustre/fsn1/projects/rech/jsy/uzj81mi/Mari_Models/Pytorch/xenopus_v1"
+experiment_name: "xenopus_v1"

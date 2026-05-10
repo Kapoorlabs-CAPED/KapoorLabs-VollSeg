@@ -1,0 +1,30 @@
+# U-Net architecture
+conv_dims: 3
+in_channels: 1
+num_classes: 1
+unet_depth: 3
+num_channels_init: 64
+use_batch_norm: true
+
+# Training
+epochs: 200
+batch_size: 4
+learning_rate: 4.0e-4
+num_workers: 4
+devices: 1
+accelerator: "auto"
+train_precision: "32-true"
+strategy: "auto"
+gradient_clip_val: 0.0
+gradient_clip_algorithm: "norm"
+slurm_auto_requeue: true
+
+# Augmentation
+pmin: 0.1
+pmax: 99.9
+augment: true
+gaussian_noise_std: 0.01
+
+# Stored on the LightningModule for inference time
+n_tiles: [1, 4, 4]
+tile_overlap: 0.125

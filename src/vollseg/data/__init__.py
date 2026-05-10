@@ -11,6 +11,7 @@ from .labels import (
 )
 from .patches import SmartPatches
 from .sequencer import StarDistSequencer, UNetSequencer
+from .smart_patches_h5 import generate_smart_patches_h5
 
 __all__ = [
     "read_float",
@@ -25,4 +26,5 @@ __all__ = [
     "UNetSequencer",
     "StarDistSequencer",
     "SmartPatches",
+    "generate_smart_patches_h5",
 ]

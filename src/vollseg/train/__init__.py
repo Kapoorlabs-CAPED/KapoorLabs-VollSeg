@@ -10,7 +10,6 @@ from .care import CARETrainer
 from .care_keras import CARETrainerKeras
 from .cellpose import CellPoseTrainer
 from .maskunet import MaskUNetTrainer
-from .smartseeds_keras import SmartSeedsKeras
 from .stardist import StarDistTrainer
 from .stardist_keras import StarDistTrainerKeras
 from .unet import UNetTrainer
@@ -27,5 +26,4 @@ __all__ = [
     "CARETrainerKeras",
     "UNetTrainerKeras",
     "StarDistTrainerKeras",
-    "SmartSeedsKeras",
 ]

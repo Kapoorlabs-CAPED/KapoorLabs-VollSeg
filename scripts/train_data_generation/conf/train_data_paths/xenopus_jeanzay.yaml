@@ -1,0 +1,11 @@
+base_data_dir: "/lustre/fsn1/projects/rech/jsy/uzj81mi/segmentation_training/"
+raw_dir: "raw"
+label_dir: "real_mask"
+
+# Pre-computed binary masks. When set and a file with the matching basename
+# exists here, the U-Net generator uses it directly as the mask target;
+# otherwise it derives binary from the integer label (label > 0).
+# Comment out or set null to force on-the-fly derivation.
+binary_mask_dir: "binary_mask"
+
+h5_file: "xenopus_segmentation.h5"

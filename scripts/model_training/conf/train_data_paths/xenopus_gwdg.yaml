@@ -1,0 +1,4 @@
+base_data_dir: "/scratch/projects/nim00007/xenopus"
+h5_file: "h5/xenopus_train.h5"
+log_path: "/scratch/projects/nim00007/models/xenopus_v1"
+experiment_name: "xenopus_v1"

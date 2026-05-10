@@ -1,0 +1,4 @@
+defaults:
+  - _self_
+  - parameters: stardist_default
+  - train_data_paths: xenopus_default
