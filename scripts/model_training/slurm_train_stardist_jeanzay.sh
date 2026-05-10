@@ -8,7 +8,7 @@
 #SBATCH --cpus-per-task=40
 #SBATCH --output=stardist_train.o%j
 #SBATCH --error=stardist_train.o%j
-#SBATCH --time=40:00:00
+#SBATCH --time=20:00:00
 
 #SBATCH --requeue
 #SBATCH --signal=SIGTERM@180
