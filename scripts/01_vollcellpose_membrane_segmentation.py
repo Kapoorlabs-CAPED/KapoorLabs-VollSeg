@@ -6,7 +6,7 @@ denoised membrane → ``VollCellSeg(...)`` (which is the
 ``cellpose_watershed_fuse`` watershed).
 
 The new version assembles the same chain through
-:func:`vollseg.VollCellSeg.from_models`, so the data dependencies are
+:func:`kapoorlabs_vollseg.VollCellSeg.from_models`, so the data dependencies are
 expressed as Pipeline composition rather than file shuffling.
 
 Inputs that *must* exist on disk first:
@@ -30,10 +30,9 @@ from natsort import natsorted
 from tifffile import imread, imwrite
 from tqdm import tqdm
 
-from vollseg import (
+from kapoorlabs_vollseg import (
     CellPoseBackbone,
     CellPoseSegmenter,
-    NucleiSeededCellPosePipeline,
     cellpose_watershed_fuse,
     ensure_cellpose_checkpoint,
 )
@@ -109,7 +108,7 @@ def main(config: SegmentScenario) -> None:
 
 # Reference: equivalent fully-composed call when nuclei are NOT cached on disk.
 #
-#   from vollseg import VollSeg, VollCellSeg, StarDistSegmenter, MaskUNetSegmenter
+#   from kapoorlabs_vollseg import VollSeg, VollCellSeg, StarDistSegmenter, MaskUNetSegmenter
 #   nuclei_pipe = VollSeg.from_models(stardist=star, roi_unet=roi)
 #   pipe = VollCellSeg.from_models(
 #       nuclei_pipeline=nuclei_pipe,

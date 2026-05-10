@@ -1,7 +1,7 @@
 """Lightning training entry point for U-Net (PyTorch first-class).
 
 Reads an H5 produced by ``generate-unet-training-data.py`` (streaming
-``raw + mask`` patches) and trains via :class:`vollseg.UNetTrainer`. The
+``raw + mask`` patches) and trains via :class:`kapoorlabs_vollseg.UNetTrainer`. The
 shape mirrors KapoorLabs-Lightning's ``lightning-roi.py`` — same Hydra
 schema convention — but uses our in-repo PyTorch trainer instead of
 ``CareInception``.
@@ -17,8 +17,8 @@ import torch
 from hydra.core.config_store import ConfigStore
 from torch.utils.data import DataLoader
 
-from vollseg import UNetTrainer
-from vollseg._lightning import H5UNetDataset, unet_collate
+from kapoorlabs_vollseg import UNetTrainer
+from kapoorlabs_vollseg._lightning import H5UNetDataset, unet_collate
 
 from scenario_train_unet import UNetTrainScenario
 

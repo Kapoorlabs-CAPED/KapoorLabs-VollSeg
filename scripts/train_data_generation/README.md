@@ -38,7 +38,7 @@ train_data_generation/
 
 ## Patch extraction
 
-Uses [`vollseg.data.generate_smart_patches_h5`](../../src/vollseg/data/smart_patches_h5.py),
+Uses [`kapoorlabs_vollseg.data.generate_smart_patches_h5`](../../src/kapoorlabs_vollseg/data/smart_patches_h5.py),
 which reproduces the original VollSeg ``SmartPatches`` algorithm:
 
 1. **Foreground patches** — instance-centered, kept only if the

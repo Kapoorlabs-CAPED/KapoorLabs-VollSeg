@@ -1,4 +1,4 @@
-"""Tests for vollseg.hub — registry lookup + ensure_model skip-when-present."""
+"""Tests for kapoorlabs_vollseg.hub — registry lookup + ensure_model skip-when-present."""
 
 from __future__ import annotations
 
@@ -7,7 +7,12 @@ from unittest.mock import patch
 
 import pytest
 
-from vollseg import XENOPUS_MODELS, ensure_cellpose_checkpoint, ensure_model, hf_repo_for
+from kapoorlabs_vollseg import (
+    XENOPUS_MODELS,
+    ensure_cellpose_checkpoint,
+    ensure_model,
+    hf_repo_for,
+)
 
 
 class TestRegistry:
@@ -58,12 +63,16 @@ class TestEnsureModel:
             def fake_download(*args, **kwargs):
                 Path(kwargs["local_dir"]).joinpath("dummy.h5").write_bytes(b"x")
                 return kwargs["local_dir"]
+
             snap.side_effect = fake_download
 
             out = ensure_model(tmp_path, "membrane_edge_enhancement")
 
         snap.assert_called_once()
-        assert snap.call_args.kwargs["repo_id"] == XENOPUS_MODELS["membrane_edge_enhancement"]
+        assert (
+            snap.call_args.kwargs["repo_id"]
+            == XENOPUS_MODELS["membrane_edge_enhancement"]
+        )
         assert out.name == "membrane_edge_enhancement"
 
 

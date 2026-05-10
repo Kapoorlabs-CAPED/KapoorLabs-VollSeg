@@ -5,8 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from vollseg import Result, VollCellSeg, VollSeg
-from vollseg.pipelines.base import Pipeline
+from kapoorlabs_vollseg import Result, VollCellSeg, VollSeg
 
 
 class _FakePipeline:
@@ -53,7 +52,7 @@ class TestVollSegFactory:
     def test_care_wraps_inner(self):
         # care + stardist should compose into DenoisedPipeline(care, stardist)
         # rather than returning either bare. We probe by checking the type.
-        from vollseg.pipelines.denoised import DenoisedPipeline
+        from kapoorlabs_vollseg.pipelines.denoised import DenoisedPipeline
 
         c = _FakePipeline()
         s = _FakePipeline()
@@ -61,7 +60,7 @@ class TestVollSegFactory:
         assert isinstance(pipe, DenoisedPipeline)
 
     def test_roi_wraps_outermost(self):
-        from vollseg.pipelines.roi import ROIPipeline
+        from kapoorlabs_vollseg.pipelines.roi import ROIPipeline
 
         s = _FakePipeline()
         roi = _FakePipeline()
@@ -80,7 +79,9 @@ class TestVollCellSegFactory:
         assert pipe is c
 
     def test_with_nuclei_pipeline_wraps(self):
-        from vollseg.pipelines.nuclei_cellpose import NucleiSeededCellPosePipeline
+        from kapoorlabs_vollseg.pipelines.nuclei_cellpose import (
+            NucleiSeededCellPosePipeline,
+        )
 
         c = _FakePipeline()
         n = _FakePipeline()

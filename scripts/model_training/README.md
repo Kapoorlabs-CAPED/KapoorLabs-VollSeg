@@ -59,7 +59,7 @@ python lightning-stardist.py \
 
 ```python
 import numpy as np
-from vollseg import StarDistSegmenter, UNetSegmenter
+from kapoorlabs_vollseg import StarDistSegmenter, UNetSegmenter
 
 # StarDist
 seg = StarDistSegmenter.from_checkpoint(

@@ -60,12 +60,12 @@ The factory composes them in the order: `chunked(roi(denoised(unet+stardist)))`
 
 The Xenopus model zoo lives as public model repos under
 `huggingface.co/KapoorLabs-Copenhagen/`. The scripts call
-`vollseg.ensure_model(model_dir, model_name)` for every configured model
+`kapoorlabs_vollseg.ensure_model(model_dir, model_name)` for every configured model
 before constructing backbones — if the directory `<model_dir>/<model_name>/`
 doesn't exist locally, it's downloaded automatically.
 
 The mapping `model_name → HF repo id` lives in
-[`src/vollseg/hub.py`](../src/vollseg/hub.py):
+[`src/kapoorlabs_vollseg/hub.py`](../src/kapoorlabs_vollseg/hub.py):
 
 | `model_name` (from YAML)       | HF repo                                                            |
 | ------------------------------ | ------------------------------------------------------------------ |
@@ -115,7 +115,7 @@ Mari_Models/
 ```
 
 To add a new model later: upload it under `KapoorLabs-Copenhagen/...`,
-add an entry to `vollseg.hub.XENOPUS_MODELS`, and an entry to
+add an entry to `kapoorlabs_vollseg.hub.XENOPUS_MODELS`, and an entry to
 `scripts/_upload_models_to_hf.py:SOURCE_LAYOUT` if you want the helper
 to handle it.
 
@@ -124,7 +124,7 @@ to handle it.
 The CellPose hierarchy is a sibling of `VollSeg`, with its own factory:
 
 ```python
-from vollseg import VollSeg, VollCellSeg, ...
+from kapoorlabs_vollseg import VollSeg, VollCellSeg, ...
 
 nuclei_pipe = VollSeg.from_models(stardist=star, roi_unet=roi)
 

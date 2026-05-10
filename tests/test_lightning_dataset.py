@@ -1,4 +1,4 @@
-"""Tests for vollseg._lightning.dataset.CarePredictionDataset and stitch_tiles.
+"""Tests for kapoorlabs_vollseg._lightning.dataset.CarePredictionDataset and stitch_tiles.
 
 Skipped if torch is not installed.
 """
@@ -10,8 +10,12 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-from vollseg._lightning.dataset import CarePredictionDataset, compute_tile_shape
-from vollseg._lightning.stitch import stitch_tiles
+# importorskip must run first; downstream imports may need torch transitively.
+from kapoorlabs_vollseg._lightning.dataset import (  # noqa: E402
+    CarePredictionDataset,
+    compute_tile_shape,
+)
+from kapoorlabs_vollseg._lightning.stitch import stitch_tiles  # noqa: E402
 
 
 class TestComputeTileShape:
@@ -44,7 +48,7 @@ class TestCarePredictionDataset:
         for i in range(len(ds)):
             _, coords = ds[i]
             zs, ys, xs, tz, ty, tx = (int(v) for v in coords.tolist())
-            coverage[zs:zs + tz, ys:ys + ty, xs:xs + tx] = True
+            coverage[zs : zs + tz, ys : ys + ty, xs : xs + tx] = True
         assert coverage.all()
 
 
@@ -69,7 +73,7 @@ class TestStitchTiles:
         tiles, coords = [], []
         for i in range(len(ds)):
             t, c = ds[i]
-            tiles.append(t * 0.0 + i)        # gradient by tile index
+            tiles.append(t * 0.0 + i)  # gradient by tile index
             coords.append(c)
         pred = (torch.stack(tiles, dim=0), torch.stack(coords, dim=0))
         out = stitch_tiles([pred], vol.shape, overlap_fraction=0.125)

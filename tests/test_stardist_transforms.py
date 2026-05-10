@@ -1,4 +1,4 @@
-"""Tests for vollseg.stardist.transforms — flips and rotations.
+"""Tests for kapoorlabs_vollseg.stardist.transforms — flips and rotations.
 
 These transforms are deterministic only with p=1, so each test forces
 the augmentation to fire and then checks the geometric invariant.
@@ -6,12 +6,12 @@ the augmentation to fire and then checks the geometric invariant.
 
 from __future__ import annotations
 
-import numpy as np
 import pytest
 
 torch = pytest.importorskip("torch")
 
-from vollseg.stardist import (
+# importorskip must run first; downstream imports may need torch transitively.
+from kapoorlabs_vollseg.stardist import (  # noqa: E402
     Compose,
     InputGaussianNoise,
     InputPercentileNormalize,
@@ -99,11 +99,13 @@ class TestInputOnlyTransforms:
 class TestCompose:
     def test_chain_application(self, raw_label_2d):
         raw, label = raw_label_2d
-        pipe = Compose([
-            InputPercentileNormalize(pmin=0, pmax=100),
-            RandomFlip(p=0.0),
-            RandomRot90(p=0.0),
-        ])
+        pipe = Compose(
+            [
+                InputPercentileNormalize(pmin=0, pmax=100),
+                RandomFlip(p=0.0),
+                RandomRot90(p=0.0),
+            ]
+        )
         out_raw, out_label = pipe(raw, label)
         # Only normalize fired (others identity at p=0).
         assert out_raw.min() >= 0.0

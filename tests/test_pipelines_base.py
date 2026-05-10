@@ -1,12 +1,12 @@
-"""Tests for vollseg.pipelines.base — Result dataclass, infer_axes."""
+"""Tests for kapoorlabs_vollseg.pipelines.base — Result dataclass, infer_axes."""
 
 from __future__ import annotations
 
 import numpy as np
 import pytest
 
-from vollseg import Result
-from vollseg.pipelines.base import infer_axes
+from kapoorlabs_vollseg import Result
+from kapoorlabs_vollseg.pipelines.base import infer_axes
 
 
 class TestResult:

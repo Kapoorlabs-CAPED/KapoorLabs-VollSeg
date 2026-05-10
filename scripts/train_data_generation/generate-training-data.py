@@ -22,7 +22,7 @@ import os
 import hydra
 from hydra.core.config_store import ConfigStore
 
-from vollseg.data import generate_smart_patches_h5
+from kapoorlabs_vollseg.data import generate_smart_patches_h5
 
 from scenario_generate import GenScenario
 

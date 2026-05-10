@@ -1,11 +1,11 @@
-"""Tests for vollseg.stardist.distance — prob target + ray-march distance map."""
+"""Tests for kapoorlabs_vollseg.stardist.distance — prob target + ray-march distance map."""
 
 from __future__ import annotations
 
 import numpy as np
 import pytest
 
-from vollseg.stardist import (
+from kapoorlabs_vollseg.stardist import (
     compute_distance_map,
     foreground_probability_map,
     rays_2d,
@@ -35,7 +35,9 @@ class TestForegroundProbabilityMap:
         # Both objects should reach 1.0 at their respective centers.
         prob = foreground_probability_map(labels_2d_two_blobs)
         for lbl in (1, 2):
-            assert pytest.approx(prob[labels_2d_two_blobs == lbl].max(), abs=1e-6) == 1.0
+            assert (
+                pytest.approx(prob[labels_2d_two_blobs == lbl].max(), abs=1e-6) == 1.0
+            )
 
 
 class TestComputeDistanceMap:
@@ -57,7 +59,7 @@ class TestComputeDistanceMap:
         # 81×81 disk, radius 20 at center.
         img = np.zeros((81, 81), dtype=np.int32)
         yy, xx = np.mgrid[0:81, 0:81]
-        img[(yy - 40) ** 2 + (xx - 40) ** 2 <= 20 ** 2] = 1
+        img[(yy - 40) ** 2 + (xx - 40) ** 2 <= 20**2] = 1
 
         rays = rays_2d(16)
         dist = compute_distance_map(img, rays)
@@ -79,4 +81,6 @@ class TestComputeDistanceMap:
     def test_rays_dim_must_match_labels(self):
         img2d = np.zeros((10, 10), dtype=np.int32)
         with pytest.raises(ValueError):
-            compute_distance_map(img2d, rays_3d_golden_spiral(8))   # 3D rays on 2D labels
+            compute_distance_map(
+                img2d, rays_3d_golden_spiral(8)
+            )  # 3D rays on 2D labels

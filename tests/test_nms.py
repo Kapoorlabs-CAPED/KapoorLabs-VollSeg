@@ -1,11 +1,10 @@
-"""Tests for vollseg.eval.nms.NMSLabel — bounding-box NMS on label images."""
+"""Tests for kapoorlabs_vollseg.eval.nms.NMSLabel — bounding-box NMS on label images."""
 
 from __future__ import annotations
 
 import numpy as np
-import pytest
 
-from vollseg.eval import NMSLabel
+from kapoorlabs_vollseg.eval import NMSLabel
 
 
 class TestSuppressOverlapping2D:
@@ -21,7 +20,7 @@ class TestSuppressOverlapping2D:
         # Two labels occupying the same bbox — one should be remapped to the other.
         img = np.zeros((20, 20), dtype=np.int32)
         img[5:15, 5:15] = 1
-        img[5:15, 5:15] = 2   # overwrites — single label remains
+        img[5:15, 5:15] = 2  # overwrites — single label remains
         out = NMSLabel(img, nms_thresh=0.5).suppress_overlapping()
         # Result is unchanged when only one label is present.
         assert set(np.unique(out)) - {0} == {2}
@@ -40,11 +39,11 @@ class TestSuppressThinZ:
     def test_drops_thin(self):
         # 3D label; one object spans 1 z-slice, one spans 5.
         img = np.zeros((10, 20, 20), dtype=np.int32)
-        img[3, 5:10, 5:10] = 1                    # thin: 1 slice
-        img[2:7, 12:17, 12:17] = 2               # thick: 5 slices
+        img[3, 5:10, 5:10] = 1  # thin: 1 slice
+        img[2:7, 12:17, 12:17] = 2  # thick: 5 slices
         out = NMSLabel(img, nms_thresh=0.5, z_thresh=2).suppress_thin_z()
-        assert (out == 1).sum() == 0              # thin dropped
-        assert (out == 2).sum() > 0               # thick kept
+        assert (out == 1).sum() == 0  # thin dropped
+        assert (out == 2).sum() > 0  # thick kept
 
     def test_2d_passthrough(self):
         img = np.zeros((20, 20), dtype=np.int32)

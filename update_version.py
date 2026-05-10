@@ -1,4 +1,4 @@
-"""Bump src/vollseg/_version.py from the most recent git tag.
+"""Bump src/kapoorlabs_vollseg/_version.py from the most recent git tag.
 
 Usage::
 
@@ -42,7 +42,7 @@ def update_version_file() -> None:
         )
         return
 
-    with open("src/vollseg/_version.py", "w") as f:
+    with open("src/kapoorlabs_vollseg/_version.py", "w") as f:
         f.write(f'__version__ = version = "{tag}"\n')
         f.write(f"__version_tuple__ = version_tuple = {parts}\n")
 

@@ -1,7 +1,7 @@
 """Lightning training entry point for StarDist (PyTorch first-class).
 
 Reads an H5 produced by ``generate-stardist-training-data.py`` (streaming
-``raw + label`` patches) and trains via :class:`vollseg.StarDistTrainer`.
+``raw + label`` patches) and trains via :class:`kapoorlabs_vollseg.StarDistTrainer`.
 Per-batch ``(prob, dist)`` targets are derived inside the dataset from
 the (possibly augmented) labels.
 """
@@ -15,8 +15,8 @@ import hydra
 from hydra.core.config_store import ConfigStore
 from torch.utils.data import DataLoader
 
-from vollseg import StarDistTrainer
-from vollseg.stardist import (
+from kapoorlabs_vollseg import StarDistTrainer
+from kapoorlabs_vollseg.stardist import (
     Compose,
     InputGaussianNoise,
     InputPercentileNormalize,

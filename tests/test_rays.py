@@ -1,11 +1,11 @@
-"""Tests for vollseg.stardist.rays — geometry of 2D angles and 3D golden-spiral."""
+"""Tests for kapoorlabs_vollseg.stardist.rays — geometry of 2D angles and 3D golden-spiral."""
 
 from __future__ import annotations
 
 import numpy as np
 import pytest
 
-from vollseg.stardist import rays_2d, rays_3d_golden_spiral
+from kapoorlabs_vollseg.stardist import rays_2d, rays_3d_golden_spiral
 
 
 class TestRays2D:

@@ -2,7 +2,7 @@
 
 Replaces ``CopenhagenWorkflow/01_segmentation_metrics.py``, which
 delegated to the external ``caped_ai_metrics.SegmentationScore`` package.
-This version uses :func:`vollseg.eval.matching_dataset` directly so the
+This version uses :func:`kapoorlabs_vollseg.eval.matching_dataset` directly so the
 metrics live in the same repo as the segmenter.
 
 Pairs prediction and ground-truth files by sorted basename. Reports
@@ -17,8 +17,8 @@ import hydra
 from hydra.core.config_store import ConfigStore
 from tifffile import imread
 
-from vollseg.data.io import iter_image_files
-from vollseg.eval import matching_dataset
+from kapoorlabs_vollseg.data.io import iter_image_files
+from kapoorlabs_vollseg.eval import matching_dataset
 
 from scenarios import SegmentScenario
 

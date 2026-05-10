@@ -21,7 +21,7 @@ PyTorch + PyTorch Lightning + [CAREamics](https://github.com/CAREamics/careamics
 ```python
 import numpy as np
 from tifffile import imread
-from vollseg import StarDistSegmenter, MaskUNetSegmenter, VollSeg
+from kapoorlabs_vollseg import StarDistSegmenter, MaskUNetSegmenter, VollSeg
 
 # Layer-1 singletons load themselves from Lightning checkpoints (PyTorch)
 # or from the Zenodo / HuggingFace pretrained registry (legacy keras).
@@ -155,26 +155,26 @@ Rule: provided models determine the pipeline shape; runtime knobs tune behavior.
 | Class names     | `CAREDenoiser`, `UNetSegmenter`, …                    | `CAREDenoiserKeras`, `UNetSegmenterKeras`, …                |
 | Model arch      | CAREamics UNet + Lightning                            | csbdeep CARE / stardist                                     |
 | Checkpoints     | `.ckpt` (Lightning) — `from_checkpoint(path)`         | csbdeep folder (`config.json` + `weights_*.h5`)             |
-| Pretrained zoo  | `vollseg.hub.XENOPUS_MODELS` (HuggingFace)            | `vollseg.pretrained` (Zenodo)                               |
+| Pretrained zoo  | `kapoorlabs_vollseg.hub.XENOPUS_MODELS` (HuggingFace)            | `kapoorlabs_vollseg.pretrained` (Zenodo)                               |
 
 Both implement the same `Pipeline.predict(image) -> Result` contract, so any composite or factory accepts either or both interchangeably.
 
-The bare-named PyTorch classes are the supported direction. The `*Keras` variants exist to keep already-trained `.h5` weights usable. `StarDistSegmenterKeras` currently has no PyTorch counterpart in the inference path — the `vollseg.stardist` rewrite ships training, but you can keep using the keras singleton for inference until you retrain.
+The bare-named PyTorch classes are the supported direction. The `*Keras` variants exist to keep already-trained `.h5` weights usable. `StarDistSegmenterKeras` currently has no PyTorch counterpart in the inference path — the `kapoorlabs_vollseg.stardist` rewrite ships training, but you can keep using the keras singleton for inference until you retrain.
 
 ---
 
 ## Pretrained Xenopus model zoo (HuggingFace)
 
-Public model repos live under `KapoorLabs-Copenhagen/` on HuggingFace. The scripts call `vollseg.ensure_model(model_dir, model_name)` for each configured model — if the directory `<model_dir>/<model_name>/` doesn't exist locally, it's downloaded automatically.
+Public model repos live under `KapoorLabs-Copenhagen/` on HuggingFace. The scripts call `kapoorlabs_vollseg.ensure_model(model_dir, model_name)` for each configured model — if the directory `<model_dir>/<model_name>/` doesn't exist locally, it's downloaded automatically.
 
 ```python
-from vollseg import ensure_model, XENOPUS_MODELS
+from kapoorlabs_vollseg import ensure_model, XENOPUS_MODELS
 
 ensure_model("./models/StarDist3D", "nuclei_xenopus_mari")
 # → downloads from KapoorLabs-Copenhagen/xenopus-stardist3d-nuclei-mari
 ```
 
-Mapping lives in [`src/vollseg/hub.py`](src/vollseg/hub.py). See [`scripts/README.md`](scripts/README.md) for the full table and one-time upload helper.
+Mapping lives in [`src/kapoorlabs_vollseg/hub.py`](src/kapoorlabs_vollseg/hub.py). See [`scripts/README.md`](scripts/README.md) for the full table and one-time upload helper.
 
 ---
 
@@ -182,7 +182,7 @@ Mapping lives in [`src/vollseg/hub.py`](src/vollseg/hub.py). See [`scripts/READM
 
 ```
 KapoorLabs-VollSeg/
-├── src/vollseg/
+├── src/kapoorlabs_vollseg/
 │   ├── _backbones/           csbdeep / stardist / careamics / cellpose backbone wrappers
 │   ├── _lightning/           inlined Lightning support (CareModule, dataset, stitch, transforms)
 │   ├── models/               Layer-1 singletons (PyTorch + Keras siblings)
@@ -200,7 +200,7 @@ KapoorLabs-VollSeg/
 ├── tests/                    pytest suite (PyTorch path; keras kept legacy)
 ├── pyproject.toml            packaging + dependencies
 ├── setup.cfg                 setuptools metadata
-└── update_version.py         git-tag → src/vollseg/_version.py
+└── update_version.py         git-tag → src/kapoorlabs_vollseg/_version.py
 ```
 
 ---
@@ -236,7 +236,7 @@ pre-commit install
 pytest tests/ -v
 ```
 
-The pre-commit hooks run `pyupgrade` (py39+), `black`, `flake8`, `autoflake`, plus a local `update_version.py` hook that syncs `src/vollseg/_version.py` from the most recent git tag.
+The pre-commit hooks run `pyupgrade` (py39+), `black`, `flake8`, `autoflake`, plus a local `update_version.py` hook that syncs `src/kapoorlabs_vollseg/_version.py` from the most recent git tag.
 
 ---
 

@@ -1,8 +1,8 @@
 """Denoise membrane channel of each timelapse with a CARE model.
 
 Replaces ``CopenhagenWorkflow/01_enhance_membrane.py``. Routes to the
-PyTorch :class:`vollseg.CAREDenoiser` when a Lightning ``.ckpt`` is
-configured; otherwise falls back to :class:`vollseg.CAREDenoiserKeras`
+PyTorch :class:`kapoorlabs_vollseg.CAREDenoiser` when a Lightning ``.ckpt`` is
+configured; otherwise falls back to :class:`kapoorlabs_vollseg.CAREDenoiserKeras`
 loading a csbdeep-trained ``.h5`` from disk. PyTorch is the preferred
 path going forward.
 """
@@ -19,7 +19,7 @@ from natsort import natsorted
 from tifffile import imread, imwrite
 from tqdm import tqdm
 
-from vollseg import (
+from kapoorlabs_vollseg import (
     CAREBackboneKeras,
     CAREDenoiser,
     CAREDenoiserKeras,

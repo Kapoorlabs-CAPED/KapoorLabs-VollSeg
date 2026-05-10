@@ -1,11 +1,11 @@
-"""Tests for vollseg.eval.matching — IoU / F1 / precision / recall."""
+"""Tests for kapoorlabs_vollseg.eval.matching — IoU / F1 / precision / recall."""
 
 from __future__ import annotations
 
 import numpy as np
 import pytest
 
-from vollseg.eval import (
+from kapoorlabs_vollseg.eval import (
     accuracy,
     f1,
     intersection_over_union,
@@ -49,7 +49,9 @@ class TestMatching:
         assert matching(gt, pred, thresh=0.2).tp == 1
 
     def test_threshold_iterable(self, labels_2d_two_blobs):
-        results = matching(labels_2d_two_blobs, labels_2d_two_blobs, thresh=(0.3, 0.5, 0.7))
+        results = matching(
+            labels_2d_two_blobs, labels_2d_two_blobs, thresh=(0.3, 0.5, 0.7)
+        )
         assert len(results) == 3
         for r in results:
             assert r.f1 == 1.0
@@ -87,11 +89,14 @@ class TestMetricFunctions:
 
 class TestIoUMatrix:
     def test_iou_self(self):
-        overlap = np.array([
-            [0, 0, 0],
-            [0, 5, 0],
-            [0, 0, 5],
-        ], dtype=np.int32)
+        overlap = np.array(
+            [
+                [0, 0, 0],
+                [0, 5, 0],
+                [0, 0, 5],
+            ],
+            dtype=np.int32,
+        )
         iou = intersection_over_union(overlap)
         # Diagonal: each label perfectly matches itself.
         assert pytest.approx(iou[1, 1]) == 1.0

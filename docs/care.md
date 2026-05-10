@@ -25,7 +25,7 @@ input volume (Z, Y, X)
    denoised volume (Z, Y, X)
 ```
 
-Wrapped inside `vollseg._lightning.CareModule` (a `LightningModule`),
+Wrapped inside `kapoorlabs_vollseg._lightning.CareModule` (a `LightningModule`),
 which provides `training_step`, `validation_step`, and a tiled
 `predict_step`. Saved checkpoints are standard Lightning `.ckpt` files.
 
@@ -35,20 +35,20 @@ which provides `training_step`, `validation_step`, and a tiled
 
 | file | role |
 |---|---|
-| `src/vollseg/_backbones/care.py` | `CAREBackbone` — wraps `CareModule` + the careamics UNet. `from_checkpoint(ckpt, depth=, ...)` rebuilds and loads weights. |
-| `src/vollseg/models/care.py` | `CAREDenoiser` — Layer-1 singleton with `predict(image) -> Result`. Tiles via `CarePredictionDataset`, stitches with linear blending. |
-| `src/vollseg/train/care.py` | `CARETrainer` — Lightning trainer; takes a `LightningDataModule` or train/val DataLoaders. |
-| `src/vollseg/_lightning/care_module.py` | `CareModule` (`BaseModule` subclass). Mirrors kapoorlabs-lightning shape so checkpoints from there load here. |
-| `src/vollseg/_lightning/dataset.py` | `CarePredictionDataset` — tiles a volume into overlapping patches. |
-| `src/vollseg/_lightning/stitch.py` | `stitch_tiles` — linear-blend overlap reconstruction. |
-| `src/vollseg/_lightning/transforms.py` | `PercentileNormalize`, `ToFloat32` — input normalization. |
+| `src/kapoorlabs_vollseg/_backbones/care.py` | `CAREBackbone` — wraps `CareModule` + the careamics UNet. `from_checkpoint(ckpt, depth=, ...)` rebuilds and loads weights. |
+| `src/kapoorlabs_vollseg/models/care.py` | `CAREDenoiser` — Layer-1 singleton with `predict(image) -> Result`. Tiles via `CarePredictionDataset`, stitches with linear blending. |
+| `src/kapoorlabs_vollseg/train/care.py` | `CARETrainer` — Lightning trainer; takes a `LightningDataModule` or train/val DataLoaders. |
+| `src/kapoorlabs_vollseg/_lightning/care_module.py` | `CareModule` (`BaseModule` subclass). Mirrors kapoorlabs-lightning shape so checkpoints from there load here. |
+| `src/kapoorlabs_vollseg/_lightning/dataset.py` | `CarePredictionDataset` — tiles a volume into overlapping patches. |
+| `src/kapoorlabs_vollseg/_lightning/stitch.py` | `stitch_tiles` — linear-blend overlap reconstruction. |
+| `src/kapoorlabs_vollseg/_lightning/transforms.py` | `PercentileNormalize`, `ToFloat32` — input normalization. |
 
 ---
 
 ## Public API quick reference
 
 ```python
-from vollseg import CAREBackbone, CAREDenoiser, CARETrainer
+from kapoorlabs_vollseg import CAREBackbone, CAREDenoiser, CARETrainer
 ```
 
 ### Inference
@@ -74,7 +74,7 @@ denoised = result.denoised               # (Z, Y, X) float32
 the Layer-2 wrappers and the `VollSeg.from_models` factory:
 
 ```python
-from vollseg import VollSeg
+from kapoorlabs_vollseg import VollSeg
 
 pipe = VollSeg.from_models(
     care=denoiser,
@@ -89,7 +89,7 @@ result = pipe.predict(volume)            # CARE → StarDist
 ```python
 import torch.nn as nn
 from torch.utils.data import DataLoader
-from vollseg import CARETrainer
+from kapoorlabs_vollseg import CARETrainer
 
 trainer = CARETrainer(
     model_name="membrane_v1",
@@ -119,7 +119,7 @@ of UNet to rebuild.
 | Training | PyTorch Lightning | csbdeep `model.train()` |
 | Checkpoint | `.ckpt` (Lightning) | `.h5` + `config.json` (csbdeep) |
 | Loaded via | `CAREDenoiser.from_checkpoint(ckpt, depth=, ...)` | `CAREDenoiserKeras(CAREBackboneKeras(config=None, name=, basedir=))` |
-| Pretrained weights | (none yet — trained models registered in `vollseg.hub.XENOPUS_MODELS`) | Zenodo registry in `vollseg.pretrained` |
+| Pretrained weights | (none yet — trained models registered in `kapoorlabs_vollseg.hub.XENOPUS_MODELS`) | Zenodo registry in `kapoorlabs_vollseg.pretrained` |
 
 Both implement the same `Pipeline.predict(image) -> Result(denoised=)`
 contract, so they're interchangeable in any composite.

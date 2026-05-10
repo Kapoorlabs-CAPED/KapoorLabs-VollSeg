@@ -45,20 +45,20 @@ post-processing on the model output.
 
 | file | role |
 |---|---|
-| `src/vollseg/_backbones/unet.py` | `UNetBackbone` — wraps a `CareModule` whose output is interpreted as binary logits. |
-| `src/vollseg/_backbones/maskunet.py` | `MaskUNetBackbone` — alias of `UNetBackbone` for naming discipline. |
-| `src/vollseg/models/unet.py` | `UNetSegmenter` — Layer-1 singleton with `predict(image) -> Result(labels=, semantic=, probability=)`. |
-| `src/vollseg/models/maskunet.py` | `MaskUNetSegmenter` — subclass of `UNetSegmenter`, only `from_checkpoint` differs. |
-| `src/vollseg/train/unet.py` | `UNetTrainer` — subclass of `CARETrainer` with the loss swapped to BCE. |
-| `src/vollseg/train/maskunet.py` | `MaskUNetTrainer` — subclass of `UNetTrainer` (currently identical defaults). |
-| `src/vollseg/_lightning/care_module.py` | `CareModule` — shared with CARE. |
+| `src/kapoorlabs_vollseg/_backbones/unet.py` | `UNetBackbone` — wraps a `CareModule` whose output is interpreted as binary logits. |
+| `src/kapoorlabs_vollseg/_backbones/maskunet.py` | `MaskUNetBackbone` — alias of `UNetBackbone` for naming discipline. |
+| `src/kapoorlabs_vollseg/models/unet.py` | `UNetSegmenter` — Layer-1 singleton with `predict(image) -> Result(labels=, semantic=, probability=)`. |
+| `src/kapoorlabs_vollseg/models/maskunet.py` | `MaskUNetSegmenter` — subclass of `UNetSegmenter`, only `from_checkpoint` differs. |
+| `src/kapoorlabs_vollseg/train/unet.py` | `UNetTrainer` — subclass of `CARETrainer` with the loss swapped to BCE. |
+| `src/kapoorlabs_vollseg/train/maskunet.py` | `MaskUNetTrainer` — subclass of `UNetTrainer` (currently identical defaults). |
+| `src/kapoorlabs_vollseg/_lightning/care_module.py` | `CareModule` — shared with CARE. |
 
 ---
 
 ## Public API quick reference
 
 ```python
-from vollseg import (
+from kapoorlabs_vollseg import (
     UNetBackbone, UNetSegmenter, UNetTrainer,
     MaskUNetBackbone, MaskUNetSegmenter, MaskUNetTrainer,
 )
@@ -87,7 +87,7 @@ prob   = result.probability        # float32 (Z, Y, X) — sigmoid output
 plays in `VollSeg.from_models`:
 
 ```python
-from vollseg import VollSeg
+from kapoorlabs_vollseg import VollSeg
 
 # StarDist gated by a U-Net ROI mask
 pipe = VollSeg.from_models(
@@ -99,7 +99,7 @@ pipe = VollSeg.from_models(
 ### Training
 
 ```python
-from vollseg import UNetTrainer
+from kapoorlabs_vollseg import UNetTrainer
 
 trainer = UNetTrainer(
     model_name="xenopus_seg_v1",
@@ -130,7 +130,7 @@ the logits via BCE-with-logits).
 | Output | logits → sigmoid → multi-Otsu | regression → multi-Otsu |
 | Training | PyTorch Lightning | csbdeep `model.train()` |
 | Checkpoint | `.ckpt` | `.h5` + `config.json` |
-| Pretrained zoo | `vollseg.hub.XENOPUS_MODELS` (HF) | `vollseg.pretrained` (Zenodo) |
+| Pretrained zoo | `kapoorlabs_vollseg.hub.XENOPUS_MODELS` (HF) | `kapoorlabs_vollseg.pretrained` (Zenodo) |
 
 `UNetSegmenter.predict` returns the same `Result(labels=, semantic=, probability=)`
 shape as the keras version, so Layer-2 composites and the factory don't

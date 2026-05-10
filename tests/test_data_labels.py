@@ -1,11 +1,11 @@
-"""Tests for vollseg.data.labels — binary↔instance, erosion, scaling, hole-fill."""
+"""Tests for kapoorlabs_vollseg.data.labels — binary↔instance, erosion, scaling, hole-fill."""
 
 from __future__ import annotations
 
 import numpy as np
 import pytest
 
-from vollseg.data import (
+from kapoorlabs_vollseg.data import (
     binary_to_labels,
     erode_labels,
     fill_label_holes,

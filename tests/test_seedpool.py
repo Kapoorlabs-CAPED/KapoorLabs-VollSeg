@@ -1,10 +1,9 @@
-"""Tests for vollseg.seedpool.SeedPool / UnetStarMask geometry primitives."""
+"""Tests for kapoorlabs_vollseg.seedpool.SeedPool / UnetStarMask geometry primitives."""
 
 from __future__ import annotations
 
-import pytest
 
-from vollseg import SeedPool, UnetStarMask
+from kapoorlabs_vollseg import SeedPool, UnetStarMask
 
 
 class TestSeedPool2D:

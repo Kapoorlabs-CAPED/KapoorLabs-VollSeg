@@ -21,7 +21,7 @@ from natsort import natsorted
 from tifffile import imread, imwrite
 from tqdm import tqdm
 
-from vollseg import (
+from kapoorlabs_vollseg import (
     CellPoseBackbone,
     CellPoseSegmenter,
     VollCellSeg,

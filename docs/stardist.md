@@ -43,7 +43,7 @@ tiled prediction.
 ## Files
 
 ```
-src/vollseg/stardist/
+src/kapoorlabs_vollseg/stardist/
 ├── rays.py                  rays_2d (angles), rays_3d_golden_spiral (anisotropy-aware)
 ├── distance.py              foreground_probability_map, compute_distance_map (numba-jit if available)
 ├── model.py                 StarDistUNet — trunk + (prob_head, dist_head)
@@ -54,9 +54,9 @@ src/vollseg/stardist/
 ├── lightning_module.py      StarDistModule — training_step / validation_step / predict_step
 └── inference.py             predict_volume — tile + stitch + peaks + rasterize + NMS + paint
 
-src/vollseg/_backbones/stardist.py     StarDistBackbone (Lightning module + rays array)
-src/vollseg/models/stardist.py         StarDistSegmenter (Layer-1 singleton)
-src/vollseg/train/stardist.py          StarDistTrainer (Lightning trainer)
+src/kapoorlabs_vollseg/_backbones/stardist.py     StarDistBackbone (Lightning module + rays array)
+src/kapoorlabs_vollseg/models/stardist.py         StarDistSegmenter (Layer-1 singleton)
+src/kapoorlabs_vollseg/train/stardist.py          StarDistTrainer (Lightning trainer)
 ```
 
 ---
@@ -64,12 +64,12 @@ src/vollseg/train/stardist.py          StarDistTrainer (Lightning trainer)
 ## Public API quick reference
 
 ```python
-from vollseg import (
+from kapoorlabs_vollseg import (
     StarDistBackbone,
     StarDistSegmenter,
     StarDistTrainer,
 )
-from vollseg.stardist import (
+from kapoorlabs_vollseg.stardist import (
     rays_2d, rays_3d_golden_spiral,
     generate_stardist_h5, StarDistH5Dataset, stardist_collate,
     Compose, RandomFlip, RandomRot90,
@@ -153,7 +153,7 @@ python scripts/02_train_stardist_pytorch.py predict \
 Equivalent Python:
 
 ```python
-from vollseg import StarDistSegmenter
+from kapoorlabs_vollseg import StarDistSegmenter
 import numpy as np
 from tifffile import imread
 
