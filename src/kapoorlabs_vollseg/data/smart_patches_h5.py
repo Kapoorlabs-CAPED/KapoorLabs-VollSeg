@@ -333,53 +333,70 @@ def _emit_paste_augmentation(
     max_count,
     rng,
 ) -> int:
-    """Composite cells onto patches centered on background voxels."""
-    zero_coords = np.argwhere(labels == 0)
-    if len(zero_coords) == 0:
+    """Composite cells onto patches centered on background voxels.
+
+    Uses **rejection sampling** rather than enumerating every background
+    voxel — for a large 3D volume with ~100M voxels of background, the
+    naive ``np.argwhere(labels == 0)`` materializes a ~2 GB index array
+    and shuffling it is O(N log N). Rejection sampling is O(max_count).
+
+    For each iteration we pick a uniformly random voxel; if it's
+    background, take a patch around it (which must also be all-zero in
+    the label image), pair it with a random cell, blend, emit. We
+    bail out after ``max_count * 200`` attempts to guarantee termination
+    even on volumes that are mostly foreground.
+    """
+    if not _has_any_background(labels):
         return 0
     props = list(regionprops(labels))
     if not props:
         return 0
 
-    rng.shuffle(zero_coords)
-    rng.shuffle(props)
-
+    n_props = len(props)
+    max_attempts = max(int(max_count) * 200, 1000)
     count = 0
-    for bg_idx in zero_coords:
-        if count >= max_count:
-            break
-        bg_region = _region_around(tuple(bg_idx), patch_shape, raw.shape)
+    attempts = 0
+    shape = labels.shape
+
+    while count < max_count and attempts < max_attempts:
+        attempts += 1
+        bg_idx = tuple(int(rng.integers(0, s)) for s in shape)
+        if labels[bg_idx] != 0:
+            continue
+        bg_region = _region_around(bg_idx, patch_shape, raw.shape)
         if bg_region is None:
             continue
-        raw_bg = raw[bg_region]
-        label_bg = labels[bg_region]
-        if label_bg.sum() != 0:
+        label_bg_patch = labels[bg_region]
+        if label_bg_patch.sum() != 0:  # patch must be all-zero
             continue
 
-        for prop in props:
-            if count >= max_count:
-                break
-            fg_region = _region_around(prop.centroid, patch_shape, raw.shape)
-            if fg_region is None:
-                continue
-            raw_fg = raw[fg_region]
-            label_fg = labels[fg_region]
+        prop = props[int(rng.integers(0, n_props))]
+        fg_region = _region_around(prop.centroid, patch_shape, raw.shape)
+        if fg_region is None:
+            continue
 
-            raw_aug = raw_bg + raw_fg
-            label_aug = (label_bg + label_fg).astype(np.int32)  # == label_fg
-            if raw_aug.sum() <= 0:
-                continue
+        raw_aug = raw[bg_region] + raw[fg_region]
+        label_aug = labels[fg_region].astype(np.int32)  # label_bg is 0
+        if raw_aug.sum() <= 0:
+            continue
 
-            if binary is not None:
-                # bg patch is all-zero label so binary[bg_region] is False;
-                # OR with fg binary for safety.
-                mask_aug = (binary[bg_region] | binary[fg_region]).astype(np.uint8)
-            else:
-                mask_aug = (label_aug > 0).astype(np.uint8)
+        if binary is not None:
+            mask_aug = (binary[bg_region] | binary[fg_region]).astype(np.uint8)
+        else:
+            mask_aug = (label_aug > 0).astype(np.uint8)
 
-            writer.append(raw_aug, label_aug, mask_aug)
-            count += 1
+        writer.append(raw_aug, label_aug, mask_aug)
+        count += 1
     return count
+
+
+def _has_any_background(labels) -> bool:
+    """Cheap check: does the volume contain at least one zero voxel?
+
+    Faster than ``np.argwhere(labels == 0)`` because we short-circuit on
+    first hit; still O(N) worst case but with small constants.
+    """
+    return bool((labels == 0).any())
 
 
 class _Writer:
