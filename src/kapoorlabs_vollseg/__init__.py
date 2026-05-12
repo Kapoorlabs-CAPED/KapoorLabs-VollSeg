@@ -60,6 +60,13 @@ from .pretrained import (
     register_model,
 )
 from .seedpool import SeedPool, UnetStarMask
+from .train import (
+    CARETrainer,
+    CellPoseTrainer,
+    MaskUNetTrainer,
+    StarDistTrainer,
+    UNetTrainer,
+)
 
 __all__ = [
     # Layer 1 — PyTorch first-class
@@ -68,6 +75,12 @@ __all__ = [
     "MaskUNetSegmenter",
     "StarDistSegmenter",
     "CellPoseSegmenter",
+    # Trainers — PyTorch first-class
+    "CARETrainer",
+    "UNetTrainer",
+    "MaskUNetTrainer",
+    "StarDistTrainer",
+    "CellPoseTrainer",
     # Layer 2
     "UNetStarDistPipeline",
     "NucleiSeededCellPosePipeline",
