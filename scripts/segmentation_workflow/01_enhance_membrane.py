@@ -57,7 +57,7 @@ def _build_denoiser(config: SegmentScenario):
     return CAREDenoiserKeras(backbone)
 
 
-@hydra.main(version_base="1.3", config_path="conf", config_name="scenario_segment")
+@hydra.main(version_base="1.3", config_path="../conf", config_name="scenario_segment")
 def main(config: SegmentScenario) -> None:
     base = Path(config.experiment_data_paths.base_directory)
     membrane_dir = base / config.experiment_data_paths.timelapse_membrane_directory

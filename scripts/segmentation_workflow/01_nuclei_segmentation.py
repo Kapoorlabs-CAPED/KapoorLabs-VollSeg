@@ -147,7 +147,7 @@ def _extract_nuclei_volume(image: np.ndarray, channel_nuclei: int) -> np.ndarray
     raise ValueError(f"Expected 4D or 5D image, got ndim={image.ndim}")
 
 
-@hydra.main(version_base="1.3", config_path="conf", config_name="scenario_segment")
+@hydra.main(version_base="1.3", config_path="../conf", config_name="scenario_segment")
 def main(config: SegmentScenario) -> None:
     base = Path(config.experiment_data_paths.base_directory)
     nuclei_dir = base / config.experiment_data_paths.timelapse_nuclei_directory

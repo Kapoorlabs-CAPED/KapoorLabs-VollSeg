@@ -56,14 +56,23 @@ pytorch = []
 # want to use the `*Keras` classes or load existing csbdeep `.h5` weights.
 keras = ["csbdeep", "stardist"]
 
-# `pip install kapoorlabs-vollseg[napari]` — adds the dock-widget plugin.
+# `pip install kapoorlabs-vollseg[napari]` — adds the segmentation dock plugin.
 # napari + qtpy + magicgui come via the plugin's own dependencies.
-# In a local checkout, do `pip install -e plugins/napari` instead;
+# In a local checkout, do `pip install -e plugins/napari-vollseg` instead;
 # the PyPI name only resolves once the plugin is published.
 napari = ["kapoorlabs-vollseg-napari>=0.1.0"]
 
+# `pip install kapoorlabs-vollseg[curvature-napari]` — adds the curvature
+# dock plugin (line-profile sampling + kymograph recording over a
+# timelapse). Local checkout: `pip install -e plugins/napari-curvature`.
+curvature-napari = ["kapoorlabs-curvature-napari>=0.1.0"]
+
 # Everything.
-all = ["csbdeep", "stardist", "kapoorlabs-vollseg-napari>=0.1.0"]
+all = [
+    "csbdeep", "stardist",
+    "kapoorlabs-vollseg-napari>=0.1.0",
+    "kapoorlabs-curvature-napari>=0.1.0",
+]
 
 # Dev / test extras.
 test = ["pytest", "pytest-cov"]

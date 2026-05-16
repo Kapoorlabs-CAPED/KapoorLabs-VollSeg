@@ -34,6 +34,7 @@ from .boundary import (
     extract_boundary_2d,
     extract_surface_3d,
 )
+from .distribution import CurvatureDistribution, compute_curvature_distribution
 from .fit_2d import fit_circle_2d
 from .fit_3d import fit_sphere_3d
 from .physics import helfrich_bending_density, young_laplace_pressure
@@ -79,4 +80,7 @@ __all__ = [
     "compute_curvature_timelapse",
     "save_curvature_timelapse_tiffs",
     "process_timelapse_folder",
+    # distribution
+    "CurvatureDistribution",
+    "compute_curvature_distribution",
 ]

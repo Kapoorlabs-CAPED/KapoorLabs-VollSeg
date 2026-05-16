@@ -6,22 +6,22 @@ fields here when a new script needs them; don't add fields preemptively.
 """
 
 from dataclasses import dataclass
-from typing import Any, List, Optional
+from typing import Optional
 
 
 @dataclass
 class Parameters:
     # IO / dispatch
-    file_type: str           # glob, e.g. "*.tif"
-    axes: str                # csbdeep / stardist axes string
-    n_tiles: List[int]       # per-axis tiling for predict()
+    file_type: str  # glob, e.g. "*.tif"
+    axes: str  # csbdeep / stardist axes string
+    n_tiles: list[int]  # per-axis tiling for predict()
     channel_nuclei: int
     channel_membrane: int
 
     # Pipeline assembly (nuclei side)
     use_roi_unet: bool
     use_seedpool: bool
-    use_care_denoise: bool   # apply CARE denoise before nuclei seg
+    use_care_denoise: bool  # apply CARE denoise before nuclei seg
 
     # Sizing / thresholds
     min_size: int
@@ -38,7 +38,7 @@ class Parameters:
     cellpose_anisotropy: Optional[float]
     cellpose_do_3d: bool
     cellpose_gpu: bool
-    cellpose_channels: List[int]      # [cyto, nuclei] per CellPose convention
+    cellpose_channels: list[int]  # [cyto, nuclei] per CellPose convention
     cellpose_bsize: int
 
     # PyTorch backbone architecture (must match training-time values).
@@ -53,7 +53,7 @@ class Parameters:
     pt_tile_overlap: float
 
     # Output naming
-    save_name_prefix: str    # prefix for per-frame output files
+    save_name_prefix: str  # prefix for per-frame output files
 
 
 @dataclass
@@ -73,8 +73,8 @@ class ModelPaths:
     care_membrane_checkpoint: Optional[str] = None
     unet_nuclei_checkpoint: Optional[str] = None
     roi_nuclei_checkpoint: Optional[str] = None
-    cellpose_membrane_model_name: Optional[str] = None    # local cellpose checkpoint
-    cellpose_membrane_model_type: Optional[str] = None    # built-in (e.g. cyto3)
+    cellpose_membrane_model_name: Optional[str] = None  # local cellpose checkpoint
+    cellpose_membrane_model_type: Optional[str] = None  # built-in (e.g. cyto3)
 
 
 @dataclass
@@ -86,7 +86,7 @@ class ExperimentDataPaths:
     timelapse_seg_membrane_directory: str
     timelapse_seg_vollcell_directory: str
     membrane_enhanced_directory: str
-    voxel_size_xyz: List[float]
+    voxel_size_xyz: list[float]
     metrics_ground_truth_directory: Optional[str] = None
     metrics_results_directory: Optional[str] = None
 

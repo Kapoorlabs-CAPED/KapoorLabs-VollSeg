@@ -1,0 +1,26 @@
+# IO
+file_type: "*.tif"
+
+# Geometry — (dz, dy, dx) for 3D, (dy, dx) for 2D
+spacing: [2.0, 0.6918, 0.6918]
+n_window: 21
+stride: 5
+geodesic: true
+
+# Physics (null = disable that term — only κ histogrammed)
+surface_tension: null
+bending_modulus: null
+spontaneous_curvature: 0.0
+saddle_splay_modulus: null
+
+# Histogram
+field: kappa           # one of: kappa, pressure, bending_density, radii
+n_bins: 50
+value_range: null      # null → pooled min/max; or [lo, hi] for fixed bins
+
+# Timelapse — set true for (T, Z, Y, X) / (T, Y, X) inputs
+timelapse: false
+spatial_ndim: 3        # 2 or 3
+
+# Tracking (timelapse only)
+max_link_distance: null

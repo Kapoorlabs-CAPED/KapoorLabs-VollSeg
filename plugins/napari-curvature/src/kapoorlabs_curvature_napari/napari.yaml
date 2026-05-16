@@ -1,0 +1,10 @@
+name: kapoorlabs-curvature-napari
+display_name: KapoorLabs Curvature
+contributions:
+  commands:
+    - id: kapoorlabs-curvature-napari.open_widget
+      python_name: kapoorlabs_curvature_napari._widget:CurvatureWidget
+      title: Open KapoorLabs Curvature
+  widgets:
+    - command: kapoorlabs-curvature-napari.open_widget
+      display_name: KapoorLabs Curvature

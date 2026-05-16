@@ -21,7 +21,8 @@ PyTorch + PyTorch Lightning + [CAREamics](https://github.com/CAREamics/careamics
 
 ```bash
 pip install -e .                              # SDK
-pip install -e plugins/napari                 # add the napari plugin
+pip install -e plugins/napari-vollseg         # add the segmentation napari plugin
+pip install -e plugins/napari-curvature       # add the curvature napari plugin
 ```
 
 ---

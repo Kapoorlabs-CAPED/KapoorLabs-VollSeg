@@ -26,7 +26,7 @@ from scenarios import SegmentScenario
 ConfigStore.instance().store(name="SegmentScenario", node=SegmentScenario)
 
 
-@hydra.main(version_base="1.3", config_path="conf", config_name="scenario_segment")
+@hydra.main(version_base="1.3", config_path="../conf", config_name="scenario_segment")
 def main(config: SegmentScenario) -> None:
     gt_dir = config.experiment_data_paths.metrics_ground_truth_directory
     if gt_dir is None:

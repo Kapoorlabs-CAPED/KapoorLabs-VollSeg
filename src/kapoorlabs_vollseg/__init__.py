@@ -34,9 +34,11 @@ from ._backbones import (
     UNetBackbone,
 )
 from .curvature import (
+    CurvatureDistribution,
     CurvatureProfile,
     CurvatureTimelapse,
     compute_curvature,
+    compute_curvature_distribution,
     compute_curvature_timelapse,
     fit_circle_2d,
     fit_sphere_3d,
@@ -145,6 +147,9 @@ __all__ = [
     "compute_curvature_timelapse",
     "save_curvature_timelapse_tiffs",
     "process_timelapse_folder",
+    # curvature distribution
+    "CurvatureDistribution",
+    "compute_curvature_distribution",
 ]
 
 

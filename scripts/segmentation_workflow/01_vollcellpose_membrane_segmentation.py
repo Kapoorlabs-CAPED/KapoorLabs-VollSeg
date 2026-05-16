@@ -71,7 +71,7 @@ def _build_cellpose(config: SegmentScenario) -> CellPoseSegmenter:
     )
 
 
-@hydra.main(version_base="1.3", config_path="conf", config_name="scenario_segment")
+@hydra.main(version_base="1.3", config_path="../conf", config_name="scenario_segment")
 def main(config: SegmentScenario) -> None:
     base = Path(config.experiment_data_paths.base_directory)
     enhanced_dir = base / config.experiment_data_paths.membrane_enhanced_directory
