@@ -1,11 +1,11 @@
-"""Map a curvature profile to a mechanical force / pressure profile.
+r"""Map a curvature profile to a mechanical force / pressure profile.
 
 Two complementary models, gated on whether the user supplies the
 material constants:
 
-- :func:`young_laplace_pressure` — surface tension γ; output is the
+- :func:`young_laplace_pressure` — surface tension \gamma; output is the
   pressure differential ΔP across the curved interface
-  (``ΔP = γκ`` in 2D, ``ΔP = 2γH`` in 3D where ``H`` is the mean
+  (``ΔP = \gammaκ`` in 2D, ``ΔP = 2\gammaH`` in 3D where ``H`` is the mean
   curvature, equal to ``κ`` for an isotropic sphere fit).
 
 - :func:`helfrich_bending_density` — bending modulus ``κ_b`` (and
@@ -30,10 +30,10 @@ def young_laplace_pressure(
     surface_tension: float,
     ndim: int,
 ) -> np.ndarray:
-    """Young-Laplace pressure differential ΔP across a curved surface.
+    r"""Young-Laplace pressure differential ΔP across a curved surface.
 
-    - 2D contour: ``ΔP = γ · κ``  (one principal curvature)
-    - 3D surface: ``ΔP = 2γ · H``  where ``H = κ`` for a sphere fit
+    - 2D contour: ``ΔP = \gamma · κ``  (one principal curvature)
+    - 3D surface: ``ΔP = 2\gamma · H``  where ``H = κ`` for a sphere fit
       (both principal curvatures equal ``1/r``, so mean curvature
       ``H = (k₁+k₂)/2 = 1/r = κ``).
 
@@ -43,7 +43,7 @@ def young_laplace_pressure(
         Signed curvature, in units of 1/length (whatever ``spacing``
         units were used when extracting the boundary).
     surface_tension
-        γ, in force/length (N/m). The output is then in pressure
+        \gamma, in force/length (N/m). The output is then in pressure
         units (N/m² = Pa).
     ndim
         2 or 3.
