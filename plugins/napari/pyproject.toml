@@ -1,0 +1,47 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kapoorlabs-vollseg-napari"
+version = "0.1.0"
+description = "Napari plugin for the KapoorLabs-VollSeg PyTorch segmentation SDK"
+readme = "README.md"
+license = {text = "BSD-3-Clause"}
+requires-python = ">=3.9"
+authors = [{name = "Varun Kapoor", email = "varun.kapoor@kapoorlabs.org"}]
+keywords = ["napari", "segmentation", "biological-imaging", "pytorch", "stardist", "cellpose", "unet"]
+classifiers = [
+  "Framework :: napari",
+  "License :: OSI Approved :: BSD License",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+]
+
+dependencies = [
+  "kapoorlabs-vollseg>=1.0.0",
+  # Required to unpickle Lightning checkpoints trained with the upstream
+  # `kapoorlabs-lightning` package — its class references (e.g.
+  # `CareEvalPreset`) land in `hyper_parameters` and the unpickler walks
+  # the import path to reconstruct them.
+  "kapoorlabs-lightning",
+  "napari>=0.4.18",
+  "magicgui>=0.7",
+  "qtpy",
+  "PyQt6",
+  "huggingface_hub",
+  "tifffile",
+  "numpy",
+]
+
+[project.optional-dependencies]
+testing = ["pytest", "pytest-qt", "napari[all]"]
+
+[project.entry-points."napari.manifest"]
+"kapoorlabs-vollseg-napari" = "kapoorlabs_vollseg_napari:napari.yaml"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.package-data]
+kapoorlabs_vollseg_napari = ["napari.yaml", "resources/*"]

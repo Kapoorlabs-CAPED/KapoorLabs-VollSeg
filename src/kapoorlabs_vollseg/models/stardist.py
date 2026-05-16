@@ -86,6 +86,40 @@ class StarDistSegmenter:
         )
         return cls(backbone, **kwargs)
 
+    @classmethod
+    def from_folder(
+        cls,
+        folder: Union[str, Path],
+        *,
+        rays: Optional[np.ndarray] = None,
+        n_rays: int = 96,
+        **kwargs,
+    ) -> StarDistSegmenter:
+        """Build from a folder holding the ``.ckpt``, optional ``rays.npy``,
+        and ``training_config.json`` (or fallback JSON). When ``rays`` is
+        not passed, the loader looks for ``rays.npy`` / ``*rays*.npy`` in
+        the folder; if neither exists it generates a fresh golden-spiral
+        set of length ``n_rays``."""
+        from .._backbones._config import (
+            find_checkpoint,
+            find_rays,
+            read_training_config,
+        )
+        from ..stardist.rays import rays_3d_golden_spiral
+
+        ckpt = find_checkpoint(folder)
+        arch = read_training_config(folder)
+        arch.update(kwargs)
+
+        if rays is None:
+            rays_path = find_rays(folder)
+            rays = (
+                np.load(rays_path)
+                if rays_path is not None
+                else rays_3d_golden_spiral(n_rays)
+            )
+        return cls.from_checkpoint(ckpt, rays=rays, **arch)
+
     def predict(
         self,
         image: np.ndarray,

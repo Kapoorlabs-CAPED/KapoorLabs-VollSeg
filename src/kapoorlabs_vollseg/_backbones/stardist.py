@@ -42,6 +42,7 @@ class StarDistBackbone:
         num_channels_init: int = 64,
         use_batch_norm: bool = True,
         map_location: Optional[str] = None,
+        weights_only: bool = False,
     ) -> StarDistBackbone:
         """Build a StarDistBackbone from a Lightning ``.ckpt``.
 
@@ -63,5 +64,6 @@ class StarDistBackbone:
             network=unet,
             optim_func=None,
             map_location=map_location,
+            weights_only=weights_only,
         )
         return cls(module, rays)

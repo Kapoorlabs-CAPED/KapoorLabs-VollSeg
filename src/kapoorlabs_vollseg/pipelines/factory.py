@@ -42,6 +42,9 @@ class VollSeg:
             these or ``care``). Both → :class:`UNetStarDistPipeline`.
         roi_unet
             Optional ROI U-Net; wraps the rest in :class:`ROIPipeline`.
+            When passed alone (no ``care`` / ``unet`` / ``stardist``)
+            the factory returns the ROI singleton directly — the
+            output is the ROI mask itself, useful for inspection.
         seedpool
             Only meaningful when both ``unet`` and ``stardist`` are given;
             enables watershed fusion.
@@ -56,8 +59,10 @@ class VollSeg:
         """
         if seedpool and not (unet is not None and stardist is not None):
             raise ValueError("seedpool=True requires both `unet` and `stardist`.")
-        if all(m is None for m in (care, unet, stardist)):
-            raise ValueError("Provide at least one of `care`, `unet`, or `stardist`.")
+        if all(m is None for m in (care, unet, stardist, roi_unet)):
+            raise ValueError(
+                "Provide at least one of `care`, `unet`, `stardist`, or `roi_unet`."
+            )
 
         # Inner segmenter
         if unet is not None and stardist is not None:
@@ -66,9 +71,14 @@ class VollSeg:
             inner = stardist
         elif unet is not None:
             inner = unet
-        else:
+        elif care is not None:
             inner = care  # care-only: degenerate "denoise as the whole pipeline"
             care = None  # don't double-wrap below
+        else:
+            # ROI-only: just return the ROI mask itself. No downstream
+            # to gate, so don't wrap in ROIPipeline.
+            inner = roi_unet
+            roi_unet = None
 
         # Decorators, outer-most last so that user-visible order matches the
         # README diagram: chunk(roi(denoised(inner)))

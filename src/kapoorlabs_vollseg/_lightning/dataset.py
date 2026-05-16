@@ -16,18 +16,29 @@ from torch.utils.data import Dataset
 
 
 class CarePredictionDataset(Dataset):
-    """Yield ``(tile_tensor, coords)`` for each tile of a 3D volume."""
+    """Yield ``(tile_tensor, coords)`` for each tile of a 2D or 3D volume.
+
+    ``coords`` is a ``2 * ndim``-long tensor laid out as
+    ``[start_axis_0, …, start_axis_n, size_axis_0, …, size_axis_n]`` —
+    the same schema :func:`stitch_tiles` consumes for both 2D and 3D.
+    """
 
     def __init__(
         self,
         volume: np.ndarray,
-        tile_shape: tuple[int, int, int],
+        tile_shape: tuple[int, ...],
         overlap: float = 0.125,
         normalizer: Optional[Callable[[torch.Tensor], torch.Tensor]] = None,
     ):
-        if volume.ndim != 3:
+        if volume.ndim not in (2, 3):
             raise ValueError(
-                f"CarePredictionDataset expects 3D volume, got ndim={volume.ndim}"
+                f"CarePredictionDataset expects a 2D or 3D volume, "
+                f"got ndim={volume.ndim}"
+            )
+        if len(tile_shape) != volume.ndim:
+            raise ValueError(
+                f"tile_shape {tile_shape} has {len(tile_shape)} entries "
+                f"but volume.ndim={volume.ndim}"
             )
         self.volume = volume
         self.tile_shape = tuple(tile_shape)
@@ -36,13 +47,13 @@ class CarePredictionDataset(Dataset):
         self.tiles = self._compute_tile_grid()
 
     def _compute_tile_grid(self):
-        tiles = []
+        tiles: list[tuple[int, ...]] = []
         for axis_idx, (vol_size, tile_size) in enumerate(
             zip(self.volume.shape, self.tile_shape)
         ):
             overlap_px = int(tile_size * self.overlap)
             stride = max(1, tile_size - overlap_px)
-            starts = []
+            starts: list[int] = []
             pos = 0
             while pos + tile_size <= vol_size:
                 starts.append(pos)
@@ -60,18 +71,29 @@ class CarePredictionDataset(Dataset):
         return len(self.tiles)
 
     def __getitem__(self, idx: int):
-        zs, ys, xs = self.tiles[idx]
-        tz, ty, tx = self.tile_shape
-        tile = self.volume[zs : zs + tz, ys : ys + ty, xs : xs + tx]
+        starts = self.tiles[idx]
+        slices = tuple(slice(s, s + sz) for s, sz in zip(starts, self.tile_shape))
+        tile = self.volume[slices]
         tile = torch.from_numpy(np.ascontiguousarray(tile, dtype=np.float32))
         if self.normalizer is not None:
             tile = self.normalizer(tile)
-        coords = torch.tensor([zs, ys, xs, tz, ty, tx], dtype=torch.long)
+        coords = torch.tensor(
+            list(starts) + list(self.tile_shape),
+            dtype=torch.long,
+        )
         return tile, coords
 
 
 def compute_tile_shape(
-    volume_shape: tuple[int, int, int], n_tiles: tuple[int, int, int]
-) -> tuple[int, int, int]:
-    """Pick a per-axis tile size that splits ``volume_shape`` into ~``n_tiles`` chunks."""
+    volume_shape: tuple[int, ...], n_tiles: tuple[int, ...]
+) -> tuple[int, ...]:
+    """Pick a per-axis tile size that splits ``volume_shape`` into ~``n_tiles`` chunks.
+
+    Works for any matching number of axes (2D, 3D, …).
+    """
+    if len(volume_shape) != len(n_tiles):
+        raise ValueError(
+            f"volume_shape {volume_shape} and n_tiles {n_tiles} must have "
+            f"the same length"
+        )
     return tuple(int(np.ceil(v / n)) for v, n in zip(volume_shape, n_tiles))

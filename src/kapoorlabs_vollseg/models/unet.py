@@ -100,19 +100,66 @@ class UNetSegmenter:
             UNetBackbone.from_checkpoint(checkpoint, **backbone_kwargs), **kwargs
         )
 
+    @classmethod
+    def from_folder(cls, folder: Union[str, Path], **kwargs) -> UNetSegmenter:
+        """Build from a model folder containing the ``.ckpt`` plus a
+        ``training_config.json`` (or fallback ``{experiment_name}.json``).
+        See :meth:`CAREDenoiser.from_folder` for the full contract."""
+        from .._backbones._config import find_checkpoint, read_training_config
+
+        ckpt = find_checkpoint(folder)
+        arch = read_training_config(folder)
+        arch.update(kwargs)
+        return cls.from_checkpoint(ckpt, **arch)
+
+    @property
+    def model_dim(self) -> int:
+        """Spatial dimensionality the loaded network was trained for (2 or 3).
+
+        Inferred from the first conv layer's weight tensor — same logic
+        as :func:`kapoorlabs_vollseg._backbones.care.infer_arch_from_checkpoint`
+        but applied to the live ``nn.Module``.
+        """
+        for m in self.backbone.module.network.modules():
+            if isinstance(m, (torch.nn.Conv2d, torch.nn.Conv3d)):
+                return m.weight.ndim - 2  # (out, in, *spatial)
+        return 3
+
     def predict(
         self,
         image: np.ndarray,
         *,
-        n_tiles: Optional[tuple[int, int, int]] = None,
+        n_tiles: Optional[tuple[int, ...]] = None,
         **_ignored,
     ) -> Result:
-        if image.ndim != 3:
+        """Dispatch on (model_dim, image.ndim):
+
+        - 3D model, 3D image — direct tiled prediction (original path).
+        - 2D model, 2D image — direct 2D tiled prediction.
+        - 2D model, 3D image — max-Z projection → 2D prediction → broadcast
+          the 2D mask back to ZYX. Matches the original VollSeg_unet flow
+          for ROI Mask-UNet (``conv_dims=2`` per ``roi.yaml``).
+        - 3D model, 2D image — error: requires a Z dimension.
+        """
+        model_dim = self.model_dim
+        if image.ndim not in (2, 3):
             raise ValueError(
-                f"UNetSegmenter.predict expects a 3D volume, got ndim={image.ndim}"
+                f"{type(self).__name__}.predict expects a 2D or 3D image, "
+                f"got ndim={image.ndim}"
+            )
+        if model_dim == 3 and image.ndim == 2:
+            raise ValueError(
+                f"{type(self).__name__}: model is 3D but input is 2D; "
+                f"cannot stretch a 3D backbone over a single slice."
             )
 
-        n = tuple(n_tiles) if n_tiles is not None else tuple(self.n_tiles)
+        # 2D-on-3D: MIP first, predict on the projection, broadcast at the end.
+        original_shape = image.shape
+        was_mip = model_dim == 2 and image.ndim == 3
+        if was_mip:
+            image = np.amax(image, axis=0)
+
+        n = self._resolve_n_tiles(n_tiles, image.ndim)
         tile_shape = compute_tile_shape(image.shape, n)
 
         dataset = CarePredictionDataset(
@@ -162,4 +209,26 @@ class UNetSegmenter:
             )
         labels = relabel_sequential(labels.astype(np.uint32))[0]
 
+        # Broadcast 2D-model output back to the original 3D shape — same
+        # gate-the-whole-stack semantics as the original VollSeg_unet.
+        if was_mip:
+            labels = np.broadcast_to(labels, original_shape).copy()
+            binary = np.broadcast_to(binary, original_shape).copy()
+            prob = np.broadcast_to(prob, original_shape).copy()
+
         return Result(labels=labels, semantic=binary, probability=prob)
+
+    def _resolve_n_tiles(
+        self,
+        n_tiles: Optional[tuple[int, ...]],
+        image_ndim: int,
+    ) -> tuple[int, ...]:
+        """Coerce the user-supplied ``n_tiles`` to match the (post-MIP) image
+        dimensionality. A 3-tuple ``(z, y, x)`` collapses to ``(y, x)`` for
+        a 2D image; a missing value falls back to ``self.n_tiles``."""
+        candidate = tuple(n_tiles) if n_tiles is not None else tuple(self.n_tiles)
+        if len(candidate) == image_ndim:
+            return candidate
+        if len(candidate) > image_ndim:
+            return candidate[-image_ndim:]
+        return (1,) * (image_ndim - len(candidate)) + candidate

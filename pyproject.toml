@@ -40,6 +40,10 @@ dependencies = [
     "lightning",
     "careamics",
     "cellpose",
+    # Hydra-trained Lightning checkpoints pickle omegaconf.ListConfig
+    # into their hyper_parameters block, so omegaconf has to be on the
+    # path at load time even when the consumer never touches Hydra.
+    "omegaconf",
 ]
 
 [project.optional-dependencies]
@@ -52,8 +56,14 @@ pytorch = []
 # want to use the `*Keras` classes or load existing csbdeep `.h5` weights.
 keras = ["csbdeep", "stardist"]
 
+# `pip install kapoorlabs-vollseg[napari]` — adds the dock-widget plugin.
+# napari + qtpy + magicgui come via the plugin's own dependencies.
+# In a local checkout, do `pip install -e plugins/napari` instead;
+# the PyPI name only resolves once the plugin is published.
+napari = ["kapoorlabs-vollseg-napari>=0.1.0"]
+
 # Everything.
-all = ["csbdeep", "stardist"]
+all = ["csbdeep", "stardist", "kapoorlabs-vollseg-napari>=0.1.0"]
 
 # Dev / test extras.
 test = ["pytest", "pytest-cov"]

@@ -9,10 +9,20 @@
 Hierarchical, composable segmentation for biological image data — a clean rewrite of the original [VollSeg](https://github.com/Kapoorlabs-CAPED/VollSeg).
 
 ```bash
-pip install kapoorlabs-vollseg
+pip install kapoorlabs-vollseg                # SDK only (PyTorch first-class)
+pip install kapoorlabs-vollseg[napari]        # SDK + the dock-widget plugin
+pip install kapoorlabs-vollseg[keras]         # SDK + legacy keras/csbdeep backend
+pip install kapoorlabs-vollseg[all]           # everything
 ```
 
 PyTorch + PyTorch Lightning + [CAREamics](https://github.com/CAREamics/careamics) is the first-class backend. The original keras / csbdeep / stardist stack is kept as a legacy backend with a `Keras` suffix on every class name so already-trained `.h5` weights still work.
+
+**Local checkout** — when developing from a git clone the napari extra cannot resolve from PyPI yet, so install the plugin from the in-repo path instead:
+
+```bash
+pip install -e .                              # SDK
+pip install -e plugins/napari                 # add the napari plugin
+```
 
 ---
 
@@ -232,6 +242,8 @@ KapoorLabs-VollSeg/
 │   ├── hub.py                HuggingFace auto-download for the Xenopus model zoo
 │   ├── pretrained.py         legacy Zenodo registry (csbdeep weights)
 │   └── seedpool.py           SeedPool / UnetStarMask geometry primitives
+├── plugins/
+│   └── napari/               kapoorlabs-vollseg-napari — QTabWidget dock plugin (PyTorch-only)
 ├── scripts/                  Hydra-driven CLI: enhance, segment, score, train_stardist
 ├── docs/                     Per-module READMEs: care.md, unet.md, stardist.md
 ├── tests/                    pytest suite (PyTorch path; keras kept legacy)

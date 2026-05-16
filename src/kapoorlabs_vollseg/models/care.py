@@ -98,6 +98,19 @@ class CAREDenoiser:
             CAREBackbone.from_checkpoint(checkpoint, **backbone_kwargs), **kwargs
         )
 
+    @classmethod
+    def from_folder(cls, folder: Union[str, Path], **kwargs) -> CAREDenoiser:
+        """Build from a model folder. ``folder`` must contain a ``.ckpt``
+        and optionally ``training_config.json`` (or a fallback
+        ``{experiment_name}.json``). Architecture knobs come from the
+        JSON first, then state-dict auto-detection, then ``kwargs``."""
+        from .._backbones._config import find_checkpoint, read_training_config
+
+        ckpt = find_checkpoint(folder)
+        arch = read_training_config(folder)
+        arch.update(kwargs)
+        return cls.from_checkpoint(ckpt, **arch)
+
     def predict(
         self,
         image: np.ndarray,

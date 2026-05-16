@@ -45,6 +45,75 @@ def _build_unet(
     )
 
 
+def infer_arch_from_checkpoint(
+    checkpoint: Union[str, Path],
+    *,
+    weights_only: bool = False,
+) -> dict:
+    """Read a Lightning ``.ckpt`` and infer the trained architecture.
+
+    Returns ``{"conv_dims", "in_channels", "num_classes",
+    "num_channels_init", "depth", "use_batch_norm"}`` from the
+    state_dict's conv weight shapes — bulletproof against drift in
+    the Hydra training config:
+
+    - ``conv_dims`` from first encoder conv weight ``ndim`` (4 → 2D, 5 → 3D)
+    - ``in_channels``, ``num_channels_init`` from its in/out channel sizes
+    - ``num_classes`` from the final conv's out channels
+    - ``depth`` from the count of ``encoder_blocks.{i}.conv1.weight`` entries
+    - ``use_batch_norm`` from the presence of any ``batch_norm*`` key
+
+    Architecture knobs explicitly passed to ``from_checkpoint`` still
+    win — this is only consulted to fill in ``None``.
+    """
+    ckpt = torch.load(str(checkpoint), map_location="cpu", weights_only=weights_only)
+    state = ckpt["state_dict"] if "state_dict" in ckpt else ckpt
+
+    # Prefix differs between training entry-points; tolerate any.
+    first_key = next(
+        (k for k in state if k.endswith("encoder.encoder_blocks.0.conv1.weight")),
+        None,
+    )
+    if first_key is None:
+        raise ValueError(
+            f"Could not locate first encoder conv weight in {checkpoint}; "
+            f"cannot infer architecture."
+        )
+    prefix = first_key[: -len("encoder.encoder_blocks.0.conv1.weight")]
+
+    first_w = state[first_key]
+    conv_dims = first_w.ndim - 2  # (out, in, *spatial)
+    num_channels_init = int(first_w.shape[0])
+    in_channels = int(first_w.shape[1])
+
+    final_key = next(
+        (k for k in state if k.endswith("final_conv.weight") and k.startswith(prefix)),
+        None,
+    )
+    num_classes = int(state[final_key].shape[0]) if final_key is not None else 1
+
+    # Each downsampling level adds two conv-block weight tensors named
+    # ``encoder_blocks.{2*level}.conv1.weight`` (the odd indices are
+    # MaxPool with no weight). So depth = count of those.
+    depth = sum(
+        1
+        for k in state
+        if k.startswith(f"{prefix}encoder.encoder_blocks.")
+        and k.endswith(".conv1.weight")
+    )
+
+    use_batch_norm = any(".batch_norm" in k for k in state if k.startswith(prefix))
+
+    return {
+        "conv_dims": conv_dims,
+        "in_channels": in_channels,
+        "num_classes": num_classes,
+        "num_channels_init": num_channels_init,
+        "depth": depth,
+        "use_batch_norm": use_batch_norm,
+    }
+
+
 class CAREBackbone:
     """Hold a trained CareModule, plus the architecture knobs needed to rebuild it.
 
@@ -63,21 +132,43 @@ class CAREBackbone:
         cls,
         checkpoint: Union[str, Path],
         *,
-        conv_dims: int = 3,
-        in_channels: int = 1,
-        num_classes: int = 1,
-        depth: int = 3,
-        num_channels_init: int = 64,
-        use_batch_norm: bool = True,
+        conv_dims: Optional[int] = None,
+        in_channels: Optional[int] = None,
+        num_classes: Optional[int] = None,
+        depth: Optional[int] = None,
+        num_channels_init: Optional[int] = None,
+        use_batch_norm: Optional[bool] = None,
         map_location: Optional[str] = None,
+        weights_only: bool = False,
     ) -> CAREBackbone:
         """Build a CAREBackbone from a Lightning ``.ckpt`` file.
 
-        Architecture knobs must match the ones used at training time —
-        these are stored alongside the checkpoint as
-        ``{experiment_name}.json`` by ``CareInception``, but we keep the
-        constructor explicit so the caller is in control.
+        All architecture knobs default to ``None`` — when not supplied,
+        they're inferred directly from the checkpoint's state_dict by
+        :func:`infer_arch_from_checkpoint`. So a 2D-trained ROI
+        Mask-UNet (``conv_dims=2`` per
+        ``KapoorLabs-Lightning/scripts/conf/parameters/roi.yaml``) and
+        a 3D-trained CARE U-Net both load with the same call.
+
+        ``weights_only`` defaults to ``False`` because Hydra-trained
+        checkpoints pickle ``omegaconf.ListConfig`` (and friends) into
+        ``hyper_parameters``, which trips PyTorch 2.6's safe-load
+        default. Flip to ``True`` if you want strict torch.load.
         """
+        arch = infer_arch_from_checkpoint(checkpoint, weights_only=weights_only)
+        # Caller-supplied values win; otherwise fall back to detection.
+        conv_dims = conv_dims if conv_dims is not None else arch["conv_dims"]
+        in_channels = in_channels if in_channels is not None else arch["in_channels"]
+        num_classes = num_classes if num_classes is not None else arch["num_classes"]
+        depth = depth if depth is not None else arch["depth"]
+        num_channels_init = (
+            num_channels_init
+            if num_channels_init is not None
+            else arch["num_channels_init"]
+        )
+        use_batch_norm = (
+            use_batch_norm if use_batch_norm is not None else arch["use_batch_norm"]
+        )
         unet = _build_unet(
             conv_dims=conv_dims,
             in_channels=in_channels,
@@ -92,5 +183,6 @@ class CAREBackbone:
             loss_func=torch.nn.MSELoss(),
             optim_func=None,
             map_location=map_location,
+            weights_only=weights_only,
         )
         return cls(module)

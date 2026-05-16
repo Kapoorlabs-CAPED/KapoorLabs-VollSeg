@@ -9,18 +9,21 @@ import numpy as np
 
 def stitch_tiles(
     predictions: Iterable[tuple],
-    volume_shape: tuple[int, int, int],
+    volume_shape: tuple[int, ...],
     overlap_fraction: float = 0.125,
 ) -> np.ndarray:
-    """Blend predicted tiles back into a full ``(Z, Y, X)`` volume.
+    """Blend predicted tiles back into a full volume of ``volume_shape``.
 
-    ``predictions`` is whatever ``CareModule.predict_step`` produces — an
-    iterable of ``(tile_batch, coord_batch)`` pairs where ``tile_batch``
-    has shape ``(B, Z, Y, X)`` and ``coord_batch`` has shape ``(B, 6)``
-    holding ``[zs, ys, xs, tz, ty, tx]`` per tile.
+    Works for any spatial dimensionality — ``coord_batch`` is a
+    ``(B, 2 * ndim)`` tensor laid out as
+    ``[start_0, …, start_n, size_0, …, size_n]`` (the schema written by
+    :class:`CarePredictionDataset`). Each tile in ``pred_batch`` has a
+    leading channel axis (or none) plus ``ndim`` spatial axes; if a
+    channel axis is present the *first* channel is taken.
     """
     output = np.zeros(volume_shape, dtype=np.float32)
     weight = np.zeros(volume_shape, dtype=np.float32)
+    ndim = len(volume_shape)
 
     for pred_batch, coord_batch in predictions:
         for i in range(pred_batch.shape[0]):
@@ -29,10 +32,16 @@ def stitch_tiles(
                 if hasattr(pred_batch[i], "cpu")
                 else np.asarray(pred_batch[i])
             )
-            zs, ys, xs, tz, ty, tx = (int(v) for v in coord_batch[i].tolist())
-            w = _make_blend_weight((tz, ty, tx), overlap_fraction)
-            output[zs : zs + tz, ys : ys + ty, xs : xs + tx] += tile * w
-            weight[zs : zs + tz, ys : ys + ty, xs : xs + tx] += w
+            # If the model emitted a leading channel axis, take channel 0.
+            if tile.ndim == ndim + 1:
+                tile = tile[0]
+            coords = [int(v) for v in coord_batch[i].tolist()]
+            starts = coords[:ndim]
+            sizes = coords[ndim:]
+            sl = tuple(slice(s, s + sz) for s, sz in zip(starts, sizes))
+            w = _make_blend_weight(tuple(sizes), overlap_fraction)
+            output[sl] += tile * w
+            weight[sl] += w
 
     mask = weight > 0
     output[mask] /= weight[mask]

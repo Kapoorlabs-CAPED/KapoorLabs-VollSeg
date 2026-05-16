@@ -1,0 +1,10 @@
+name: kapoorlabs-vollseg-napari
+display_name: KapoorLabs VollSeg
+contributions:
+  commands:
+    - id: kapoorlabs-vollseg-napari.open_widget
+      python_name: kapoorlabs_vollseg_napari._widget:VollSegWidget
+      title: Open KapoorLabs VollSeg
+  widgets:
+    - command: kapoorlabs-vollseg-napari.open_widget
+      display_name: KapoorLabs VollSeg
