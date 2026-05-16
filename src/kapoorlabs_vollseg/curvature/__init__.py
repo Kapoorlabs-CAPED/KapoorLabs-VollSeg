@@ -38,6 +38,22 @@ from .fit_2d import fit_circle_2d
 from .fit_3d import fit_sphere_3d
 from .physics import helfrich_bending_density, young_laplace_pressure
 from .profile import CurvatureProfile
+from .render import (
+    process_label_folder,
+    render_curvature_volume,
+    save_curvature_tiffs,
+)
+from .timelapse import (
+    CurvatureTimelapse,
+    compute_curvature_timelapse,
+    process_timelapse_folder,
+    save_curvature_timelapse_tiffs,
+)
+from .tracking import (
+    FEATURE_DEFAULT_WEIGHTS,
+    available_features,
+    link_labels_timelapse,
+)
 from .windows import bfs_geodesic_neighbors, euclidean_neighbors
 
 __all__ = [
@@ -52,4 +68,15 @@ __all__ = [
     "helfrich_bending_density",
     "bfs_geodesic_neighbors",
     "euclidean_neighbors",
+    "render_curvature_volume",
+    "save_curvature_tiffs",
+    "process_label_folder",
+    # timelapse
+    "link_labels_timelapse",
+    "FEATURE_DEFAULT_WEIGHTS",
+    "available_features",
+    "CurvatureTimelapse",
+    "compute_curvature_timelapse",
+    "save_curvature_timelapse_tiffs",
+    "process_timelapse_folder",
 ]

@@ -35,10 +35,18 @@ from ._backbones import (
 )
 from .curvature import (
     CurvatureProfile,
+    CurvatureTimelapse,
     compute_curvature,
+    compute_curvature_timelapse,
     fit_circle_2d,
     fit_sphere_3d,
     helfrich_bending_density,
+    link_labels_timelapse,
+    process_label_folder,
+    process_timelapse_folder,
+    render_curvature_volume,
+    save_curvature_tiffs,
+    save_curvature_timelapse_tiffs,
     young_laplace_pressure,
 )
 from .fusion import cellpose_watershed_fuse, watershed_fuse
@@ -128,6 +136,15 @@ __all__ = [
     "fit_sphere_3d",
     "young_laplace_pressure",
     "helfrich_bending_density",
+    "render_curvature_volume",
+    "save_curvature_tiffs",
+    "process_label_folder",
+    # timelapse curvature
+    "link_labels_timelapse",
+    "CurvatureTimelapse",
+    "compute_curvature_timelapse",
+    "save_curvature_timelapse_tiffs",
+    "process_timelapse_folder",
 ]
 
 
