@@ -178,6 +178,42 @@ Mapping lives in [`src/kapoorlabs_vollseg/hub.py`](src/kapoorlabs_vollseg/hub.py
 
 ---
 
+## Curvature & force profiles
+
+Segmentation is a means, not an end — once you have labels you usually want to *measure* something. The `kapoorlabs_vollseg.curvature` toolkit takes a label image (2D or 3D) and returns, for each region, a sliding-window curvature profile along its boundary or surface, plus optional Young-Laplace pressure and Helfrich bending-energy profiles when material constants are supplied.
+
+```python
+from tifffile import imread
+from kapoorlabs_vollseg.curvature import compute_curvature
+
+labels = imread("data/segmented_cells.tif")
+
+profiles = compute_curvature(
+    labels,
+    spacing=(2.0, 0.6918, 0.6918),   # (dz, dy, dx) μm
+    n_window=21, stride=5,
+    geodesic=True,                    # mesh-aware neighbours in 3D
+    surface_tension=1e-3,             # N/m — optional → Young-Laplace ΔP
+    bending_modulus=2e-20,            # J   — optional → Helfrich f
+)
+
+for label_id, profile in profiles.items():
+    print(label_id, profile.summary())
+    # profile.centers, .kappa, .normals, .radii   — geometry
+    # profile.pressure                            — γκ (2D) or 2γH (3D)
+    # profile.bending_density                     — κ_b·(2H-C₀)² + κ_G·K
+```
+
+Pipeline:
+
+- **2D** — `skimage.measure.find_contours` per label → ordered sub-pixel contour → sliding window of `n_window` consecutive points → Kasa algebraic circle fit → `κ = ±1/r` (sign from `dot(radius_vec, outward_normal)`).
+- **3D** — `skimage.measure.marching_cubes` per label → triangle mesh + per-vertex outward normals → at every `stride`-th vertex, the `n_window` nearest neighbours by **geodesic distance** along the mesh (BFS-hop default, Dijkstra optional, or Euclidean KDTree as opt-in) → Coope linear sphere fit → signed mean curvature.
+- **Physics** is bolt-on: pass `surface_tension` to get a Young-Laplace pressure column, pass `bending_modulus` (and optionally `spontaneous_curvature` / `saddle_splay_modulus`) for a Helfrich bending-energy column. Both are skipped when their constants are absent.
+
+Anisotropic voxels are first-class: pass `spacing=(dz, dy, dx)` and the resulting curvatures come out in `1/length` of that unit (so feed μm in, get 1/μm out).
+
+---
+
 ## Repository layout
 
 ```
@@ -188,6 +224,7 @@ KapoorLabs-VollSeg/
 │   ├── models/               Layer-1 singletons (PyTorch + Keras siblings)
 │   ├── pipelines/            Layer-2 composites + Layer-3 factories
 │   ├── stardist/             pure-PyTorch StarDist (rays, distance, model, losses, training, inference)
+│   ├── curvature/            per-label curvature + Young-Laplace / Helfrich force profiles
 │   ├── train/                Lightning + csbdeep trainers
 │   ├── data/                 file IO, label morphology, Sequence loaders, SmartPatches
 │   ├── eval/                 matching metrics, NMS, threshold optimization
