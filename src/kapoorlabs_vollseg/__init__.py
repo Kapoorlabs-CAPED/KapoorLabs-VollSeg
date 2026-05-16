@@ -33,6 +33,14 @@ from ._backbones import (
     StarDistBackbone,
     UNetBackbone,
 )
+from .curvature import (
+    CurvatureProfile,
+    compute_curvature,
+    fit_circle_2d,
+    fit_sphere_3d,
+    helfrich_bending_density,
+    young_laplace_pressure,
+)
 from .fusion import cellpose_watershed_fuse, watershed_fuse
 from .hub import XENOPUS_MODELS, ensure_cellpose_checkpoint, ensure_model, hf_repo_for
 from .models import (
@@ -113,6 +121,13 @@ __all__ = [
     "ensure_model",
     "ensure_cellpose_checkpoint",
     "hf_repo_for",
+    # curvature & force profiles
+    "compute_curvature",
+    "CurvatureProfile",
+    "fit_circle_2d",
+    "fit_sphere_3d",
+    "young_laplace_pressure",
+    "helfrich_bending_density",
 ]
 
 
