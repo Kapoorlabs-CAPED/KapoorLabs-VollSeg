@@ -99,8 +99,20 @@ class CARETrainer:
         callbacks=None,
         logger=None,
     ):
-        """Train the model. Provide either ``datamodule`` or the two dataloaders."""
+        """Train the model. Provide either ``datamodule`` or the two dataloaders.
+
+        Checkpoints + the ``training_config.json`` / ``{model_name}.json``
+        sidecars land **directly** under ``model_dir`` (no
+        ``lightning_logs/version_X/checkpoints/`` nesting). The Lightning
+        defaults that produce that nesting are explicitly overridden:
+        - ``callbacks`` adds a :class:`ModelCheckpoint` with
+          ``dirpath=model_dir`` unless the caller supplies one already.
+        - ``logger`` is a flat :class:`CSVLogger` writing
+          ``model_dir/metrics.csv`` unless the caller passes something.
+        """
         from lightning import Trainer
+        from lightning.pytorch.callbacks import ModelCheckpoint
+        from lightning.pytorch.loggers import CSVLogger
 
         unet = _build_unet(
             conv_dims=self.conv_dims,
@@ -120,6 +132,25 @@ class CARETrainer:
 
         self._save_hparams()
 
+        callbacks = list(callbacks) if callbacks else []
+        if not any(isinstance(cb, ModelCheckpoint) for cb in callbacks):
+            callbacks.append(
+                ModelCheckpoint(
+                    dirpath=os.fspath(self.model_dir),
+                    filename=f"{self.model_name}-{{epoch:03d}}",
+                    save_last=True,
+                    save_top_k=-1,  # keep all; user can prune later
+                    every_n_epochs=1,
+                )
+            )
+        if logger is None:
+            # name="" + version="" suppresses CSVLogger's own subfolders.
+            logger = CSVLogger(
+                save_dir=os.fspath(self.model_dir),
+                name="",
+                version="",
+            )
+
         trainer = Trainer(
             max_epochs=self.epochs,
             accelerator=self.accelerator,
@@ -127,7 +158,7 @@ class CARETrainer:
             precision=self.precision,
             strategy=self.strategy,
             default_root_dir=os.fspath(self.model_dir),
-            callbacks=callbacks or [],
+            callbacks=callbacks,
             logger=logger,
         )
         if datamodule is not None:
@@ -141,7 +172,7 @@ class CARETrainer:
         return trainer, module
 
     def _save_hparams(self) -> None:
-        out = {
+        params = {
             "conv_dims": self.conv_dims,
             "in_channels": self.in_channels,
             "num_classes": self.num_classes,
@@ -155,5 +186,11 @@ class CARETrainer:
             "epochs": self.epochs,
             "model_name": self.model_name,
         }
+        # Canonical name (what `_backbones._config.read_training_config`
+        # looks for first) wrapped in the same {"parameters": ...} block
+        # the Hydra-dumped training_config.json uses upstream.
+        with open(self.model_dir / "training_config.json", "w") as f:
+            json.dump({"parameters": params}, f, indent=2)
+        # Legacy / kapoorlabs-lightning fallback name.
         with open(self.model_dir / f"{self.model_name}.json", "w") as f:
-            json.dump(out, f, indent=2)
+            json.dump(params, f, indent=2)

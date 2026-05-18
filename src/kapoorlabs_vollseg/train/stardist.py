@@ -85,8 +85,17 @@ class StarDistTrainer:
         callbacks=None,
         logger=None,
     ):
-        """Train. Provide either ``datamodule`` or train/val dataloaders."""
+        """Train. Provide either ``datamodule`` or train/val dataloaders.
+
+        Checkpoints + sidecars (``rays.npy``, ``training_config.json``,
+        legacy ``{model_name}.json``) all land **directly** in
+        ``model_dir`` — Lightning's ``lightning_logs/version_X/checkpoints/``
+        nesting is explicitly overridden via a ``ModelCheckpoint``
+        callback with ``dirpath=model_dir`` and a flat ``CSVLogger``.
+        """
         from lightning import Trainer
+        from lightning.pytorch.callbacks import ModelCheckpoint
+        from lightning.pytorch.loggers import CSVLogger
 
         unet = StarDistUNet(
             n_rays=self.rays.shape[0],
@@ -104,10 +113,33 @@ class StarDistTrainer:
             loss_lam=self.loss_lam,
         )
 
-        # Persist rays + arch knobs alongside the ckpt so prediction can rebuild.
-        rays_path = self.model_dir / f"{self.model_name}.rays.npy"
+        # Persist rays + arch knobs alongside the ckpt so prediction can
+        # rebuild. Canonical name ``rays.npy`` is what
+        # ``_backbones._config.find_rays`` looks for first.
+        rays_path = self.model_dir / "rays.npy"
         np.save(rays_path, self.rays)
+        # Legacy name for older predict scripts.
+        legacy_rays_path = self.model_dir / f"{self.model_name}.rays.npy"
+        np.save(legacy_rays_path, self.rays)
         self._save_hparams(rays_path)
+
+        callbacks = list(callbacks) if callbacks else []
+        if not any(isinstance(cb, ModelCheckpoint) for cb in callbacks):
+            callbacks.append(
+                ModelCheckpoint(
+                    dirpath=os.fspath(self.model_dir),
+                    filename=f"{self.model_name}-{{epoch:03d}}",
+                    save_last=True,
+                    save_top_k=-1,
+                    every_n_epochs=1,
+                )
+            )
+        if logger is None:
+            logger = CSVLogger(
+                save_dir=os.fspath(self.model_dir),
+                name="",
+                version="",
+            )
 
         trainer = Trainer(
             max_epochs=self.epochs,
@@ -116,7 +148,7 @@ class StarDistTrainer:
             precision=self.precision,
             strategy=self.strategy,
             default_root_dir=os.fspath(self.model_dir),
-            callbacks=callbacks or [],
+            callbacks=callbacks,
             logger=logger,
         )
         if datamodule is not None:
@@ -130,13 +162,14 @@ class StarDistTrainer:
         return trainer, module
 
     def _save_hparams(self, rays_path: Path) -> None:
-        out = {
+        params = {
             "model_name": self.model_name,
             "rays_file": rays_path.name,
             "n_rays": int(self.rays.shape[0]),
             "conv_dims": self.conv_dims,
             "in_channels": self.in_channels,
-            "depth": self.depth,
+            "unet_depth": self.depth,  # canonical key in our JSON
+            "depth": self.depth,  # legacy alias
             "num_channels_init": self.num_channels_init,
             "use_batch_norm": self.use_batch_norm,
             "loss_lam": self.loss_lam,
@@ -146,5 +179,10 @@ class StarDistTrainer:
             "batch_size": self.batch_size,
             "epochs": self.epochs,
         }
+        # Canonical name our `read_training_config` loader checks first,
+        # nested under "parameters" exactly like the Hydra-dumped one.
+        with open(self.model_dir / "training_config.json", "w") as f:
+            json.dump({"parameters": params}, f, indent=2)
+        # Legacy / kapoorlabs-lightning fallback.
         with open(self.model_dir / f"{self.model_name}.json", "w") as f:
-            json.dump(out, f, indent=2)
+            json.dump(params, f, indent=2)
