@@ -11,16 +11,15 @@ anisotropy: [2.0, 1.0, 1.0]    # null for 2D / isotropic 3D
 loss_lam: 0.2
 
 # Training
-epochs: 400
+epochs: 100
 batch_size: 4
-learning_rate: 4.0e-4
+learning_rate: 4.0e-3
 num_workers: 4
 devices: 1
 accelerator: "auto"
 train_precision: "32-true"
 strategy: "auto"
-gradient_clip_val: 0.0
-gradient_clip_algorithm: "norm"
+
 slurm_auto_requeue: true
 
 # Augmentation

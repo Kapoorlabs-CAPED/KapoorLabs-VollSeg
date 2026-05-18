@@ -15,8 +15,7 @@ devices: 1
 accelerator: "auto"
 train_precision: "32-true"
 strategy: "auto"
-gradient_clip_val: 0.0
-gradient_clip_algorithm: "norm"
+
 slurm_auto_requeue: true
 
 # Augmentation

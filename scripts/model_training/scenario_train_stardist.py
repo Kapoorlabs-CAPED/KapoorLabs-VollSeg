@@ -27,8 +27,7 @@ class StarDistTrainParams:
     accelerator: str
     train_precision: str
     strategy: str
-    gradient_clip_val: float
-    gradient_clip_algorithm: str
+
     slurm_auto_requeue: bool
 
     # Augmentation
