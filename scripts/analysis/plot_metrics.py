@@ -62,13 +62,17 @@ def plot_metrics_csv(
     csv_path: Path,
     *,
     out_dir: Path,
+    model_name: str = "",
     unwanted_substrings: tuple[str, ...] = ("gpu", "memory"),
     save: bool = True,
     show: bool = True,
 ) -> Path | None:
     """Read ``metrics.csv`` and emit one subplot per metric column.
 
-    Returns the PNG path when ``save=True``, else ``None``.
+    When ``model_name`` is given, the saved PNG is prefixed with it
+    (``<model_name>_metrics_all_in_one.png``) so multiple runs can
+    share an ``out_dir`` without overwriting each other. Returns the
+    PNG path when ``save=True``, else ``None``.
     """
     df = pd.read_csv(csv_path)
     if df.empty:
@@ -126,7 +130,12 @@ def plot_metrics_csv(
     out_dir.mkdir(parents=True, exist_ok=True)
     png_path = None
     if save:
-        png_path = out_dir / "metrics_all_in_one.png"
+        png_name = (
+            f"{model_name}_metrics_all_in_one.png"
+            if model_name
+            else "metrics_all_in_one.png"
+        )
+        png_path = out_dir / png_name
         fig.savefig(png_path, dpi=300)
         print(f"Saved all-in-one plot to: {png_path}")
     if show:
@@ -149,8 +158,10 @@ def main() -> None:
         "--out-dir",
         type=Path,
         default=None,
-        help="Where to write metrics_all_in_one.png "
-        "(defaults to the CSV's parent folder).",
+        help="Where to write the PNG. Defaults to "
+        "``<script_dir>/<model_name>/`` — a sub-folder named after the "
+        "model (the log folder's stem), created next to this script. "
+        "Matches the layout `plot_npz_files_interactive` produces.",
     )
     p.add_argument("--no-save", action="store_true", help="Don't write the PNG.")
     p.add_argument("--no-show", action="store_true", help="Don't pop the window.")
@@ -163,10 +174,14 @@ def main() -> None:
     args = p.parse_args()
 
     csv_path = _resolve_csv(args.path)
-    out_dir = args.out_dir or csv_path.parent
+    # The model name = the log folder's stem (same convention upstream uses:
+    # ``page_output_dir = npz_directory_current.stem``).
+    model_name = csv_path.parent.name or "metrics"
+    out_dir = args.out_dir or (Path(__file__).resolve().parent / model_name)
     plot_metrics_csv(
         csv_path,
         out_dir=out_dir,
+        model_name=model_name,
         unwanted_substrings=tuple(args.unwanted),
         save=not args.no_save,
         show=not args.no_show,
