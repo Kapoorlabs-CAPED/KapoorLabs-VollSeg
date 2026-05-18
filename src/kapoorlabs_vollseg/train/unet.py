@@ -1,21 +1,22 @@
 """U-Net trainer — first-class PyTorch implementation.
 
-Same shape as :class:`CARETrainer`: build a careamics UNet, wrap in
-:class:`CareModule`, hand to ``lightning.Trainer``. The only meaningful
-difference is the loss (BCE-with-logits by default, since this is binary
-segmentation rather than regression).
+Thin alias over :class:`CARETrainer` so the training script reads
+``UNetTrainer`` (intent: semantic segmentation), but the underlying
+shape and loss match the kapoorlabs-lightning ``CareInception`` path
+that the ROI / nuclei / membrane U-Net checkpoints were trained with
+— ``nn.MSELoss`` by default. Override via ``loss_func=`` if you want
+BCE-with-logits.
 """
 
 from __future__ import annotations
-
-import torch.nn as nn
 
 from .care import CARETrainer
 
 
 class UNetTrainer(CARETrainer):
-    """Train a U-Net for binary semantic segmentation."""
+    """Train a U-Net for binary semantic segmentation.
 
-    def __init__(self, **kwargs):
-        kwargs.setdefault("loss_func", nn.BCEWithLogitsLoss())
-        super().__init__(**kwargs)
+    Inherits the MSE default loss from :class:`CARETrainer`, matching
+    upstream ``CareInception``. Pass ``loss_func=nn.BCEWithLogitsLoss()``
+    explicitly if you want logits-style binary cross-entropy.
+    """

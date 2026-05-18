@@ -86,8 +86,16 @@ class H5UNetDataset(Dataset):
 
 
 def unet_collate(batch):
-    """Stack ``(raw, mask)`` triples and add the channel dim."""
+    """Stack ``(raw, mask)`` pairs into ``(B, *spatial)`` tensors.
+
+    The channel dim is **not** added here — :class:`CareModule` does
+    that inside ``training_step`` / ``validation_step`` /
+    ``predict_step`` via its own ``unsqueeze(1)``, matching the
+    contract H5CareDataset + the default torch collate produce. Adding
+    a channel here would double-unsqueeze and feed a 6D tensor into
+    Conv3d (the crash you'd otherwise see at the start of training).
+    """
     raws, masks = zip(*batch)
-    raw = torch.stack(raws, dim=0).unsqueeze(1)  # (B, 1, *spatial)
-    mask = torch.stack(masks, dim=0).unsqueeze(1)  # (B, 1, *spatial)
+    raw = torch.stack(raws, dim=0)  # (B, *spatial)
+    mask = torch.stack(masks, dim=0)  # (B, *spatial)
     return raw, mask
