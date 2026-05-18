@@ -144,6 +144,16 @@ class CARETrainer:
                 )
             )
         if logger is None:
+            # Wipe any stale CSVLogger artefacts from a previous run —
+            # if the metric-key set differs from this run's,
+            # Lightning's _rewrite_with_new_header crashes mid-fit
+            # trying to merge the old rows into the new column schema.
+            # Safer to start fresh; checkpoints are preserved by the
+            # ModelCheckpoint callback regardless.
+            for stale in ("metrics.csv", "hparams.yaml"):
+                stale_p = self.model_dir / stale
+                if stale_p.exists():
+                    stale_p.unlink()
             # name="" + version="" suppresses CSVLogger's own subfolders.
             logger = CSVLogger(
                 save_dir=os.fspath(self.model_dir),

@@ -135,6 +135,16 @@ class StarDistTrainer:
                 )
             )
         if logger is None:
+            # Wipe stale CSVLogger artefacts so a re-run with a
+            # different metric-key schema can't trip
+            # ``_rewrite_with_new_header`` (Lightning fails to merge
+            # rows whose columns differ from the new header).
+            # Checkpoints are preserved by the ModelCheckpoint
+            # callback regardless of this cleanup.
+            for stale in ("metrics.csv", "hparams.yaml"):
+                stale_p = self.model_dir / stale
+                if stale_p.exists():
+                    stale_p.unlink()
             logger = CSVLogger(
                 save_dir=os.fspath(self.model_dir),
                 name="",

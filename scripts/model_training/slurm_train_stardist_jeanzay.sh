@@ -4,7 +4,7 @@
 #SBATCH -C a100
 #SBATCH --gres=gpu:1
 #SBATCH --partition=gpu_p5
-#SBATCH --job-name=vs_train_stardist
+#SBATCH --job-name=stardist
 #SBATCH --cpus-per-task=40
 #SBATCH --output=stardist_train.o%j
 #SBATCH --error=stardist_train.o%j
