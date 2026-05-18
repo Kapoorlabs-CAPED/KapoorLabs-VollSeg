@@ -9,7 +9,7 @@ use_batch_norm: true
 # Training
 epochs: 200
 batch_size: 4
-learning_rate: 4.0e-4
+learning_rate: 4.0e-3
 num_workers: 4
 devices: 1
 accelerator: "auto"

@@ -1,0 +1,10 @@
+defaults:
+  - _self_
+  - experiment_data_paths: predict_default
+
+parameters:
+  file_type: "*.tif"
+  n_tiles: [1, 1]         # ROI is 2D — single tile is usually fine on 1024×1024
+  tile_overlap: 0.125
+  batch_size: 4
+  min_size_mask: 100      # drop ROI regions smaller than this (px)

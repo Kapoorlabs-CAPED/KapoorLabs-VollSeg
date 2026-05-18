@@ -1,0 +1,4 @@
+base_data_dir: /path/to/experiment
+input_dir: raw            # under base_data_dir
+output_dir: prediction    # under base_data_dir; created if missing
+log_path: /path/to/trained_model_folder

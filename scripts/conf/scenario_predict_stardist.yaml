@@ -1,0 +1,12 @@
+defaults:
+  - _self_
+  - experiment_data_paths: predict_default
+
+parameters:
+  file_type: "*.tif"
+  n_tiles: [1, 4, 4]
+  tile_overlap: 0.125
+  batch_size: 4
+  n_rays: 96              # used only if rays.npy is missing in log_path
+  prob_thresh: null       # null → use the value baked into the trained module
+  nms_thresh: null        # same

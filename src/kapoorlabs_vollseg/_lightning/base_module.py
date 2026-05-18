@@ -26,7 +26,7 @@ class BaseModule(LightningModule):
         optim_func: Optional[Any] = None,
         scheduler: Optional[Any] = None,
         *,
-        on_step: bool = True,
+        on_step: bool = False,
         on_epoch: bool = True,
         sync_dist: bool = True,
         rank_zero_only: bool = False,

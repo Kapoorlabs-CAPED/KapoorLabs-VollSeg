@@ -1,0 +1,9 @@
+defaults:
+  - _self_
+  - experiment_data_paths: predict_default
+
+parameters:
+  file_type: "*.tif"
+  n_tiles: [1, 4, 4]
+  tile_overlap: 0.125
+  batch_size: 4
