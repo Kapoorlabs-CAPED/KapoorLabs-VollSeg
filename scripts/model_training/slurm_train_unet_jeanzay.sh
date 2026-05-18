@@ -22,4 +22,4 @@ conda activate torchenv
 module load cuda/11.8.0
 
 srun --unbuffered python lightning-unet.py \
-    train_data_paths=xenopus_jeanzay
+    train_data_paths=xenopus_jeanzay_unet
