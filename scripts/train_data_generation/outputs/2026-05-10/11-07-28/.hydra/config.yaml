@@ -1,0 +1,21 @@
+parameters:
+  patch_shape:
+  - 16
+  - 256
+  - 256
+  val_files: 1
+  lower_ratio_fore_to_back: 0.05
+  upper_ratio_fore_to_back: 1.0
+  erosion_iterations: 0
+  max_foreground_patches_per_image: .inf
+  paste_augmentation: true
+  max_paste_patches_per_image: 200
+  seed: 42
+  overwrite: false
+  file_type: '*.tif'
+train_data_paths:
+  base_data_dir: /lustre/fsn1/projects/rech/jsy/uzj81mi/segmentation_training/
+  raw_dir: raw
+  label_dir: real_mask
+  binary_mask_dir: binary_mask
+  h5_file: xenopus_segmentation.h5
