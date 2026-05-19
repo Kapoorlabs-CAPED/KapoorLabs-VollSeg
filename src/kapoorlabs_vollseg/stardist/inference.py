@@ -124,6 +124,83 @@ def predict_volume(
     )
 
 
+def precompute_peaks_and_masks(
+    prob_map: np.ndarray,
+    dist_map: np.ndarray,
+    rays: np.ndarray,
+    vol_shape: tuple,
+    *,
+    min_prob: float = 0.01,
+    min_distance: int = 2,
+):
+    """Detect + rasterise once at the **lowest** ``prob_thresh`` the sweep
+    will ever try, so the threshold optimiser can reuse the same masks
+    across every ``(prob_thresh, nms_thresh)`` candidate.
+
+    Returns ``(centers, scores, bboxes, masks)`` sorted by descending
+    score — the optimiser then just filters by ``prob_thresh``, runs the
+    cheap NMS overlap loop, and paints. Skips the slow
+    :func:`peak_local_max` + per-peak meshgrid rasterise that
+    :func:`nms_to_labels` would otherwise rerun every iteration.
+    """
+    centers = peak_local_max(
+        prob_map,
+        threshold_abs=min_prob,
+        min_distance=min_distance,
+        exclude_border=False,
+    )
+    if centers.size == 0:
+        return centers, np.zeros((0,), np.float32), [], []
+
+    scores = prob_map[tuple(centers.T)].astype(np.float32)
+    dists = np.stack([dist_map[(slice(None),) + tuple(c)] for c in centers], axis=0)
+    order = np.argsort(-scores)
+    centers, scores, dists = centers[order], scores[order], dists[order]
+
+    bboxes, masks = [], []
+    for c, d in zip(centers, dists):
+        bbox, mask = _rasterize_to_bbox(c, rays, d, vol_shape)
+        bboxes.append(bbox)
+        masks.append(mask)
+    return centers, scores, bboxes, masks
+
+
+def labels_from_precomputed(
+    centers: np.ndarray,
+    scores: np.ndarray,
+    bboxes: list,
+    masks: list,
+    vol_shape: tuple,
+    *,
+    prob_thresh: float,
+    nms_thresh: float,
+) -> np.ndarray:
+    """Fast inner loop for the threshold sweep — filter by ``prob_thresh``,
+    NMS-overlap-loop, paint. ``centers / scores / bboxes / masks`` must
+    come from :func:`precompute_peaks_and_masks` (already score-sorted)."""
+    if len(scores) == 0:
+        return np.zeros(vol_shape, dtype=np.uint16)
+    keep = scores >= prob_thresh
+    if not keep.any():
+        return np.zeros(vol_shape, dtype=np.uint16)
+
+    kept_bbox: list = []
+    kept_masks: list = []
+    for i in np.where(keep)[0]:
+        bbox_i, mask_i = bboxes[i], masks[i]
+        if not mask_i.any():
+            continue
+        suppress = False
+        for bbox_j, mask_j in zip(kept_bbox, kept_masks):
+            if _bbox_iou(bbox_i, mask_i, bbox_j, mask_j) >= nms_thresh:
+                suppress = True
+                break
+        if not suppress:
+            kept_bbox.append(bbox_i)
+            kept_masks.append(mask_i)
+    return _paint_labels(vol_shape, kept_bbox, kept_masks)
+
+
 def nms_to_labels(
     prob_map: np.ndarray,
     dist_map: np.ndarray,

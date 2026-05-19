@@ -26,12 +26,16 @@ import h5py
 import hydra
 import numpy as np
 from hydra.core.config_store import ConfigStore
+from omegaconf import OmegaConf
 from scipy.optimize import minimize_scalar
 from tqdm import tqdm
 
 from kapoorlabs_vollseg import StarDistSegmenter
 from kapoorlabs_vollseg.eval.matching import matching_dataset
-from kapoorlabs_vollseg.stardist.inference import nms_to_labels
+from kapoorlabs_vollseg.stardist.inference import (
+    labels_from_precomputed,
+    precompute_peaks_and_masks,
+)
 
 from scenario_optimize_stardist_thresholds import OptimizeThresholdsScenario
 
@@ -82,7 +86,30 @@ def main(config: OptimizeThresholdsScenario):
     for img in tqdm(images, desc="forward", unit="patch"):
         cached_maps.append(star.predict_maps(img, n_tiles=n_tiles))
 
-    # ───────── Stage 2: sweep thresholds — only NMS+rasterize is rerun.
+    # ───────── Stage 1.5: peak-detect + rasterise once per patch at the
+    # lowest prob_thresh the sweep will ever try, so Stage 2 is just a
+    # filter + cheap-IoU NMS + paint.
+    min_prob = float(OmegaConf.select(p, "min_prob", default=0.01))
+    print(
+        f"\nStage 1.5: precompute peaks + polyhedron masks "
+        f"(min_prob={min_prob:g}, min_distance=2)…"
+    )
+    precomputed = []
+    for (prob_map, dist_map), shape in tqdm(
+        list(zip(cached_maps, vol_shapes)), desc="rasterize", unit="patch"
+    ):
+        precomputed.append(
+            precompute_peaks_and_masks(
+                prob_map,
+                dist_map,
+                rays,
+                shape,
+                min_prob=min_prob,
+                min_distance=2,
+            )
+        )
+
+    # ───────── Stage 2: sweep thresholds — only filter+NMS+paint reruns.
     nms_grid = tuple(p.nms_threshs)
     iou_thr = tuple(p.iou_threshs)
     measure = p.measure
@@ -92,16 +119,16 @@ def main(config: OptimizeThresholdsScenario):
 
     def _score(prob_thresh: float, nms_thresh: float) -> float:
         preds = [
-            nms_to_labels(
-                prob_map,
-                dist_map,
-                rays,
+            labels_from_precomputed(
+                centers,
+                scores,
+                bboxes,
+                masks,
                 shape,
                 prob_thresh=float(prob_thresh),
                 nms_thresh=float(nms_thresh),
-                min_distance=2,
             )
-            for (prob_map, dist_map), shape in zip(cached_maps, vol_shapes)
+            for (centers, scores, bboxes, masks), shape in zip(precomputed, vol_shapes)
         ]
         stats = matching_dataset(
             labels,
@@ -125,11 +152,13 @@ def main(config: OptimizeThresholdsScenario):
                 bar.set_postfix_str(f"prob={prob_thresh:.3f} -> {measure}={value:.3f}")
                 return -value
 
+            # Bracket the search inside [min_prob, 0.95] — prob=1.0 always
+            # yields zero instances and just wastes golden-section iters.
             opt = minimize_scalar(
                 fn,
-                method="golden",
-                tol=1e-2,
-                options={"maxiter": 20},
+                method="bounded",
+                bounds=(max(min_prob, 0.05), 0.95),
+                options={"xatol": 1e-2, "maxiter": 20},
             )
         score = -opt.fun
         if score > best["score"]:
