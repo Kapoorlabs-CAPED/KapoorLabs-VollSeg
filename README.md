@@ -17,6 +17,15 @@ pip install kapoorlabs-vollseg[all]           # everything
 
 PyTorch + PyTorch Lightning + [CAREamics](https://github.com/CAREamics/careamics) is the first-class backend. The original keras / csbdeep / stardist stack is kept as a legacy backend with a `Keras` suffix on every class name so already-trained `.h5` weights still work.
 
+### What's new
+
+- **PyTorch StarDist inference is now first-class.** End-to-end pipeline: tile + predict + stitch → peak detection → triangulated polyhedron rasterisation (matches upstream `stardist.polyhedron_to_label`) → NMS → label image. Rays use the same golden-spiral parameterisation as `stardist.Rays_GoldenSpiral` (anisotropy convention included), so weights are transferable.
+- **`from_folder(path)` on every singleton.** Pairs the Lightning `.ckpt` with a `training_config.json` sidecar so `conv_dims`, `unet_depth`, `n_rays`, optimised thresholds, etc. are picked up automatically. Drop a folder on disk, call `Singleton.from_folder(folder)`, done.
+- **Multi-GPU timelapse prediction.** `predict_timelapse(pipeline, volume, devices=N, strategy="ddp")` shards the T-axis across GPUs via Lightning `Trainer.predict`, gathers the per-rank outputs onto rank 0, and returns a stacked `(T, …)` result. Works for any `Pipeline` — singleton or composite.
+- **HuggingFace auto-download with disk-priority.** Predict scripts read `log_path` and `hf_repo_id` from Hydra YAMLs; on-disk path wins when it exists, HF download is the fallback. The new PyTorch model repos live under [`KapoorLabs`](https://huggingface.co/KapoorLabs) (e.g. `KapoorLabs/xenopus-stardist-pytorch`, `KapoorLabs/xenopus-unet-pytorch`, `KapoorLabs/xenopus-maskunet-pytorch`); the legacy keras Xenopus zoo stays under [`KapoorLabs-Copenhagen`](https://huggingface.co/KapoorLabs-Copenhagen).
+- **StarDist threshold optimisation, cached.** `scripts/model_training/optimize-stardist-thresholds.py` runs the network **once per validation patch**, precomputes peaks + rasterised polyhedra once at the lowest probability the sweep will visit, and reuses them across every `(prob_thresh, nms_thresh)` candidate. Writes results back into `training_config.json` so prediction picks them up automatically.
+- **Predict scripts for every singleton + the composite**: `scripts/model_prediction/predict-{care,roi,unet,stardist,combo}.py`. All Hydra-driven, all support multi-GPU timelapse, all nest their output inside the input directory so files don't sprawl.
+
 **Local checkout** — when developing from a git clone the napari extra cannot resolve from PyPI yet, so install the plugin from the in-repo path instead:
 
 ```bash
@@ -170,22 +179,51 @@ Rule: provided models determine the pipeline shape; runtime knobs tune behavior.
 
 Both implement the same `Pipeline.predict(image) -> Result` contract, so any composite or factory accepts either or both interchangeably.
 
-The bare-named PyTorch classes are the supported direction. The `*Keras` variants exist to keep already-trained `.h5` weights usable. `StarDistSegmenterKeras` currently has no PyTorch counterpart in the inference path — the `kapoorlabs_vollseg.stardist` rewrite ships training, but you can keep using the keras singleton for inference until you retrain.
+The bare-named PyTorch classes are the supported direction. The `*Keras` variants exist to keep already-trained `.h5` weights usable. Both backends now cover training **and** inference for every model — including StarDist 3D, which uses a triangulated star-convex polyhedron rasteriser equivalent to upstream `stardist.polyhedron_to_label`.
+
+---
+
+## Prediction — `from_folder`, multi-GPU, HF auto-download
+
+Every singleton exposes a `from_folder` constructor that pairs a Lightning `.ckpt` with the `training_config.json` sidecar the trainer writes. The loader picks up architecture knobs (`conv_dims`, `unet_depth`, `in_channels`, …), per-model thresholds (StarDist `prob_thresh` / `nms_thresh`), and — for StarDist — the `rays.npy` so inference reuses the same ray geometry the model was trained on.
+
+```python
+from kapoorlabs_vollseg import StarDistSegmenter, predict_timelapse
+
+# Single folder: ckpt + training_config.json + rays.npy.
+star = StarDistSegmenter.from_folder("models/xenopus_stardist/")
+
+# Single 3D volume.
+result = star.predict(imread("frame.tif"))
+
+# 4D (TZYX) timelapse, sharded across 4 GPUs.
+out = predict_timelapse(star, imread("timelapse.tif"),
+                        devices=4, strategy="ddp")
+labels_tzyx = out["labels"]   # full (T, Z, Y, X) stack on rank 0
+```
+
+`predict_timelapse` wraps any `Pipeline` (singleton or composite) in a thin `TimelapsePredictor` `LightningModule` and dispatches it via `Trainer.predict` with a `DistributedSampler` over T. Per-rank outputs are gathered onto rank 0 via `torch.distributed.gather_object` (so the 35 GB stack only lives on one rank), deduped against sampler-padding, sorted by T, and stacked.
+
+Each predict script (`scripts/model_prediction/predict-{care,roi,unet,stardist,combo}.py`) supports the same priority on its `log_path` / `hf_repo_id` YAML entries: **disk path wins when it exists**; HF download is the fallback. Outputs land in `<input_dir>/<output_dir>/<file>.tif` so segmentation results are nested inside the raw folder.
 
 ---
 
 ## Pretrained Xenopus model zoo (HuggingFace)
 
-Public model repos live under `KapoorLabs-Copenhagen/` on HuggingFace. The scripts call `kapoorlabs_vollseg.ensure_model(model_dir, model_name)` for each configured model — if the directory `<model_dir>/<model_name>/` doesn't exist locally, it's downloaded automatically.
+Two orgs, two backends:
+
+- [**`KapoorLabs/`**](https://huggingface.co/KapoorLabs) — the **new PyTorch** model repos used by the predict scripts (`xenopus-stardist-pytorch`, `xenopus-unet-pytorch`, `xenopus-maskunet-pytorch`, …). Auto-downloaded when a script's `hf_repo_id` is set and the local `log_path` doesn't exist on disk.
+- [**`KapoorLabs-Copenhagen/`**](https://huggingface.co/KapoorLabs-Copenhagen) — the **legacy keras / csbdeep / stardist** models published with the original paper, kept around so already-trained `.h5` weights keep working. Resolved via `kapoorlabs_vollseg.ensure_model` from the `XENOPUS_MODELS` registry.
 
 ```python
+# Legacy keras zoo:
 from kapoorlabs_vollseg import ensure_model, XENOPUS_MODELS
 
 ensure_model("./models/StarDist3D", "nuclei_xenopus_mari")
 # → downloads from KapoorLabs-Copenhagen/xenopus-stardist3d-nuclei-mari
 ```
 
-Mapping lives in [`src/kapoorlabs_vollseg/hub.py`](src/kapoorlabs_vollseg/hub.py). See [`scripts/README.md`](scripts/README.md) for the full table and one-time upload helper.
+The legacy registry mapping lives in [`src/kapoorlabs_vollseg/hub.py`](src/kapoorlabs_vollseg/hub.py); the new PyTorch repos are addressed by the `hf_repo_id` entry in each predict YAML under `scripts/conf/experiment_data_paths/`. See [`scripts/README.md`](scripts/README.md) for the full table.
 
 ---
 

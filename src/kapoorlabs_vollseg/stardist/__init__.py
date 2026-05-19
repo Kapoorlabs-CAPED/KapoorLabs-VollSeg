@@ -29,7 +29,7 @@ from .inference import StarDistResult, predict_volume
 from .lightning_module import StarDistModule
 from .losses import dist_loss, prob_loss, stardist_loss
 from .model import StarDistUNet, split_outputs
-from .rays import rays_2d, rays_3d_golden_spiral
+from .rays import compute_faces, rays_2d, rays_3d_golden_spiral
 from .transforms import (
     Compose,
     InputGaussianNoise,
@@ -42,6 +42,7 @@ __all__ = [
     # rays
     "rays_2d",
     "rays_3d_golden_spiral",
+    "compute_faces",
     # label encoding
     "compute_distance_map",
     "foreground_probability_map",
