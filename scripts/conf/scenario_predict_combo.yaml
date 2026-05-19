@@ -1,0 +1,24 @@
+defaults:
+  - _self_
+  - experiment_data_paths: predict_combo_jeanzay
+
+parameters:
+  file_type: "*.tif"
+  n_tiles: [1, 4, 4]
+  tile_overlap: 0.125
+  batch_size: 4
+
+  # StarDist runtime
+  n_rays: 96
+  prob_thresh: null          # null → use the value baked into the trained module
+  nms_thresh: null           # same
+
+  # Pipeline shape — set seedpool=true for the marker-controlled watershed
+  # fusion (requires both stardist+unet). With seedpool=false, stardist
+  # gives the instance labels and unet contributes its semantic mask on
+  # the side.
+  seedpool: false
+
+  # Post-processing floors
+  min_size_mask: 100         # remove_small_objects in the MaskUNet ROI
+  min_size: 10               # remove_small_objects in the UNet output
