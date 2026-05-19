@@ -141,10 +141,36 @@ def predict_timelapse(
         return {}
 
     # Lightning returns a list-of-batch-outputs; each batch is one frame
-    # so each entry is a dict. Sort by T index so DDP shuffling can't
-    # leave the output stack out of order.
+    # so each entry is a dict. Each rank only sees the slice the
+    # DistributedSampler handed it, so under DDP we must gather across
+    # ranks before stacking — otherwise rank 0 writes T/world_size
+    # frames and the other ranks clobber that same file with their own
+    # shard.
     per_frame = [d for d in per_frame if d is not None]
-    per_frame.sort(key=lambda d: d["t"])
+
+    import torch.distributed as dist
+
+    if dist.is_available() and dist.is_initialized():
+        world_size = dist.get_world_size()
+        rank = dist.get_rank()
+        gather_list = [None] * world_size if rank == 0 else None
+        dist.gather_object(per_frame, gather_list, dst=0)
+        if rank != 0:
+            return {}
+        per_frame = [d for sub in gather_list for d in (sub or [])]
+
+    # DistributedSampler pads to be divisible by world_size by repeating
+    # samples — dedupe by T before stacking so duplicates from padding
+    # don't end up in the output.
+    seen: set[int] = set()
+    unique = []
+    for d in per_frame:
+        t = int(d["t"])
+        if t in seen:
+            continue
+        seen.add(t)
+        unique.append(d)
+    per_frame = sorted(unique, key=lambda d: int(d["t"]))
 
     out: dict[str, Optional[np.ndarray]] = {}
     for key in ("labels", "semantic", "roi", "denoised", "probability"):
