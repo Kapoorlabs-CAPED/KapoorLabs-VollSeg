@@ -1,5 +1,5 @@
-base_data_dir: "/lustre/fsn1/projects/rech/jsy/uzj81mi/segmentation_prediction/"
-input_dir: raw
+base_data_dir: "/lustre/fsn1/projects/rech/jsy/uzj81mi/"
+input_dir: demo_data
 output_dir: stardist
 log_path: "/lustre/fsn1/projects/rech/jsy/uzj81mi/models_stardist_pytorch/"
 hf_repo_id: "KapoorLabs/xenopus-stardist-pytorch"

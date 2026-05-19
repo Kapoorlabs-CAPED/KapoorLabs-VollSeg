@@ -1,5 +1,5 @@
-base_data_dir: "/lustre/fsn1/projects/rech/jsy/uzj81mi/segmentation_prediction/"
-input_dir: raw
+base_data_dir: "/lustre/fsn1/projects/rech/jsy/uzj81mi/"
+input_dir: demo_data
 output_dir: combo
 
 # Per-role model location. Leave both fields of a role empty/null to
