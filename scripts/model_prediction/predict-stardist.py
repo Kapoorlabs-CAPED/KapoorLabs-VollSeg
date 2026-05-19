@@ -27,6 +27,7 @@ from tifffile import imread, imwrite
 from tqdm import tqdm
 
 from kapoorlabs_vollseg import StarDistSegmenter, ensure_model, predict_timelapse
+from kapoorlabs_vollseg._backbones._config import read_thresholds
 
 from scenarios import StarDistPredictScenario
 
@@ -62,9 +63,16 @@ def main(config: StarDistPredictScenario):
     print(f"Loading StarDist from {log_path}")
     star = StarDistSegmenter.from_folder(log_path, n_rays=p.n_rays)
     n_tiles = tuple(p.n_tiles)
+
+    # JSON thresholds in the model folder override the yaml defaults
+    # (yaml = 0.4 / 0.3 baseline; JSON wins when the model ships its own).
+    overrides = read_thresholds(log_path)
+    prob_thresh = overrides.get("prob_thresh", p.prob_thresh)
+    nms_thresh = overrides.get("nms_thresh", p.nms_thresh)
     print(
         f"  rays={star.backbone.rays.shape[0]} "
-        f"prob_thresh={p.prob_thresh}  nms_thresh={p.nms_thresh}"
+        f"prob_thresh={prob_thresh}  nms_thresh={nms_thresh}"
+        + ("   (from training_config.json)" if overrides else "")
     )
 
     files = sorted(glob(os.path.join(input_dir, p.file_type)))
@@ -84,8 +92,8 @@ def main(config: StarDistPredictScenario):
                 accelerator=p.accelerator,
                 strategy=p.strategy,
                 enable_progress_bar=True,
-                prob_thresh=p.prob_thresh,
-                nms_thresh=p.nms_thresh,
+                prob_thresh=prob_thresh,
+                nms_thresh=nms_thresh,
                 n_tiles=n_tiles,
             )
             if not out:
@@ -100,8 +108,8 @@ def main(config: StarDistPredictScenario):
         else:
             result = star.predict(
                 vol,
-                prob_thresh=p.prob_thresh,
-                nms_thresh=p.nms_thresh,
+                prob_thresh=prob_thresh,
+                nms_thresh=nms_thresh,
                 n_tiles=n_tiles,
             )
             imwrite(out_path, result.labels.astype(np.uint32))

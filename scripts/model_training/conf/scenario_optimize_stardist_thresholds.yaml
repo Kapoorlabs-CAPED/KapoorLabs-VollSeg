@@ -1,0 +1,4 @@
+defaults:
+  - _self_
+  - parameters: optimize_stardist_thresholds
+  - train_data_paths: xenopus_default

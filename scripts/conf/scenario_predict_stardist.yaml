@@ -8,8 +8,11 @@ parameters:
   tile_overlap: 0.125
   batch_size: 4
   n_rays: 96              # used only if rays.npy is missing in log_path
-  prob_thresh: null       # null → use the value baked into the trained module
-  nms_thresh: null        # same
+  # Sensible defaults; overridden by training_config.json["parameters"]
+  # when the trained model folder ships its own (e.g. from a future
+  # optimize_thresholds step).
+  prob_thresh: 0.4
+  nms_thresh: 0.3
 
   # Multi-GPU: set devices > 1 + strategy=ddp to T-shard a timelapse.
   devices: 4

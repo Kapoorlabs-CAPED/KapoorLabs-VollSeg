@@ -1,0 +1,23 @@
+# UNet trunk knobs — only used as kwargs if from_folder can't read them
+# from training_config.json (it normally can).
+conv_dims: 3
+in_channels: 1
+
+# Used only if rays.npy is missing in log_path.
+n_rays: 96
+
+# Search grid — mirrors csbdeep's OptimizeThreshold defaults.
+nms_threshs: [0.0, 0.3, 0.4, 0.5]
+iou_threshs: [0.3, 0.5, 0.7]
+measure: accuracy        # accuracy / precision / recall / f1
+
+# Inference runtime
+n_tiles: [1, 4, 4]
+
+# H5 split — usually "val" for tuning, "train" if you're debugging the optimizer.
+split: val
+max_samples: -1          # -1 = use everything in the split
+
+# Normalisation forwarded to OptimizeThreshold.
+normalize_inputs: true
+norm_axes: [0, 1]

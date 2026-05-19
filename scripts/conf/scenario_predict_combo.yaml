@@ -8,10 +8,11 @@ parameters:
   tile_overlap: 0.125
   batch_size: 4
 
-  # StarDist runtime
+  # StarDist runtime — defaults overridden by training_config.json["parameters"]
+  # on the StarDist model folder when present.
   n_rays: 96
-  prob_thresh: null          # null → use the value baked into the trained module
-  nms_thresh: null           # same
+  prob_thresh: 0.4
+  nms_thresh: 0.3
 
   # Pipeline shape — set seedpool=true for the marker-controlled watershed
   # fusion (requires both stardist+unet). With seedpool=false, stardist

@@ -103,3 +103,35 @@ def find_rays(folder: Union[str, Path]) -> Optional[Path]:
     for p in folder.glob("*rays*.npy"):
         return p
     return None
+
+
+_THRESHOLD_FIELDS = ("prob_thresh", "nms_thresh")
+
+
+def read_thresholds(folder: Union[str, Path]) -> dict[str, Any]:
+    """Return ``prob_thresh`` / ``nms_thresh`` from the model JSON if present.
+
+    Looks under ``training_config.json["parameters"]`` first, then the
+    fallback ``{experiment_name}.json`` (flat). Empty dict when neither
+    file has the keys — callers should keep their yaml / CLI default.
+
+    These thresholds aren't part of the training arch, but a future
+    ``optimize_thresholds`` step (mirroring csbdeep) can write them
+    back into the JSON and they'll override the yaml default on the
+    next predict run.
+    """
+    folder = Path(folder)
+    train_path = folder / "training_config.json"
+    if train_path.is_file():
+        with train_path.open() as fh:
+            blob = json.load(fh)
+        params = blob.get("parameters", {})
+        return {k: params[k] for k in _THRESHOLD_FIELDS if k in params}
+
+    candidates = [p for p in folder.glob("*.json") if p.name != "training_config.json"]
+    if candidates:
+        with candidates[0].open() as fh:
+            blob = json.load(fh)
+        return {k: blob[k] for k in _THRESHOLD_FIELDS if k in blob}
+
+    return {}

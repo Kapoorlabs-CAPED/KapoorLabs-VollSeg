@@ -44,6 +44,7 @@ from kapoorlabs_vollseg import (
     ensure_model,
     predict_timelapse,
 )
+from kapoorlabs_vollseg._backbones._config import read_thresholds
 
 from scenarios import ComboPredictScenario
 
@@ -97,6 +98,16 @@ def main(config: ComboPredictScenario):
     if roi is not None:
         roi.min_size = int(p.min_size_mask)
 
+    # JSON in the StarDist folder overrides the yaml prob/nms defaults.
+    overrides = read_thresholds(star_path) if star_path else {}
+    prob_thresh = overrides.get("prob_thresh", p.prob_thresh)
+    nms_thresh = overrides.get("nms_thresh", p.nms_thresh)
+    if overrides:
+        print(
+            f"  prob_thresh={prob_thresh}  nms_thresh={nms_thresh}   "
+            f"(from training_config.json)"
+        )
+
     pipe = VollSeg.from_models(
         stardist=star,
         unet=unet,
@@ -128,8 +139,8 @@ def main(config: ComboPredictScenario):
                 accelerator=p.accelerator,
                 strategy=p.strategy,
                 enable_progress_bar=True,
-                prob_thresh=p.prob_thresh,
-                nms_thresh=p.nms_thresh,
+                prob_thresh=prob_thresh,
+                nms_thresh=nms_thresh,
                 n_tiles=n_tiles,
             )
             if not out:
@@ -152,8 +163,8 @@ def main(config: ComboPredictScenario):
         else:
             r = pipe.predict(
                 vol,
-                prob_thresh=p.prob_thresh,
-                nms_thresh=p.nms_thresh,
+                prob_thresh=prob_thresh,
+                nms_thresh=nms_thresh,
                 n_tiles=n_tiles,
             )
             if r.labels is not None:
