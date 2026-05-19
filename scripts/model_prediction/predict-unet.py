@@ -18,7 +18,7 @@ import numpy as np
 from hydra.core.config_store import ConfigStore
 from tifffile import imread, imwrite
 
-from kapoorlabs_vollseg import UNetSegmenter
+from kapoorlabs_vollseg import UNetSegmenter, ensure_model
 
 from scenarios import UNetPredictScenario
 
@@ -37,8 +37,18 @@ def main(config: UNetPredictScenario):
     output_dir = Path(paths.base_data_dir) / paths.output_dir
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    print(f"Loading U-Net from {paths.log_path}")
-    unet = UNetSegmenter.from_folder(paths.log_path)
+    log_path = paths.log_path
+    if paths.hf_repo_id:
+        name = paths.hf_repo_id.split("/")[-1]
+        log_path = str(
+            ensure_model(
+                paths.hf_model_dir or paths.log_path,
+                name,
+                repo_id=paths.hf_repo_id,
+            )
+        )
+    print(f"Loading U-Net from {log_path}")
+    unet = UNetSegmenter.from_folder(log_path)
     unet.min_size = int(p.min_size)
     n_tiles = tuple(p.n_tiles)
     print(f"  model_dim = {unet.model_dim}D")

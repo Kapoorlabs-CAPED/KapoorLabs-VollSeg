@@ -17,7 +17,7 @@ import numpy as np
 from hydra.core.config_store import ConfigStore
 from tifffile import imread, imwrite
 
-from kapoorlabs_vollseg import CAREDenoiser
+from kapoorlabs_vollseg import CAREDenoiser, ensure_model
 
 from scenarios import CarePredictScenario
 
@@ -36,8 +36,18 @@ def main(config: CarePredictScenario):
     output_dir = Path(paths.base_data_dir) / paths.output_dir
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    print(f"Loading CARE model from {paths.log_path}")
-    care = CAREDenoiser.from_folder(paths.log_path)
+    log_path = paths.log_path
+    if paths.hf_repo_id:
+        name = paths.hf_repo_id.split("/")[-1]
+        log_path = str(
+            ensure_model(
+                paths.hf_model_dir or paths.log_path,
+                name,
+                repo_id=paths.hf_repo_id,
+            )
+        )
+    print(f"Loading CARE model from {log_path}")
+    care = CAREDenoiser.from_folder(log_path)
     n_tiles = tuple(p.n_tiles)
 
     files = sorted(glob(os.path.join(input_dir, p.file_type)))

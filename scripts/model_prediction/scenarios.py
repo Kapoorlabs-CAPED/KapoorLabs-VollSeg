@@ -14,7 +14,9 @@ class ExperimentDataPaths:
     base_data_dir: str
     input_dir: str  # under base_data_dir
     output_dir: str  # under base_data_dir; created if missing
-    log_path: str  # absolute path to the trained-model folder
+    log_path: str  # local trained-model folder (used when hf_repo_id is null)
+    hf_repo_id: Optional[str] = None  # e.g. "KapoorLabs/xenopus-stardist-pytorch"
+    hf_model_dir: str = ""  # local cache root for HF; falls back to log_path
 
 
 @dataclass

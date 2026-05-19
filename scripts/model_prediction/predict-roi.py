@@ -20,7 +20,7 @@ import numpy as np
 from hydra.core.config_store import ConfigStore
 from tifffile import imread, imwrite
 
-from kapoorlabs_vollseg import MaskUNetSegmenter
+from kapoorlabs_vollseg import MaskUNetSegmenter, ensure_model
 
 from scenarios import RoiPredictScenario
 
@@ -39,8 +39,18 @@ def main(config: RoiPredictScenario):
     output_dir = Path(paths.base_data_dir) / paths.output_dir
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    print(f"Loading ROI Mask-UNet from {paths.log_path}")
-    roi = MaskUNetSegmenter.from_folder(paths.log_path)
+    log_path = paths.log_path
+    if paths.hf_repo_id:
+        name = paths.hf_repo_id.split("/")[-1]
+        log_path = str(
+            ensure_model(
+                paths.hf_model_dir or paths.log_path,
+                name,
+                repo_id=paths.hf_repo_id,
+            )
+        )
+    print(f"Loading ROI Mask-UNet from {log_path}")
+    roi = MaskUNetSegmenter.from_folder(log_path)
     # Bump the min-size floor; the singleton's default of 10 is too low
     # for the typical mask-UNet output of a tissue ROI.
     roi.min_size = int(p.min_size_mask)
