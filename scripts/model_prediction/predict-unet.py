@@ -42,11 +42,11 @@ def main(config: UNetPredictScenario):
     log_path = paths.log_path
     hf_repo_id = OmegaConf.select(paths, "hf_repo_id", default=None)
     hf_model_dir = OmegaConf.select(paths, "hf_model_dir", default="")
-    if hf_repo_id:
+    if (not log_path or not Path(log_path).is_dir()) and hf_repo_id:
         name = hf_repo_id.split("/")[-1]
         log_path = str(
             ensure_model(
-                hf_model_dir or paths.log_path,
+                hf_model_dir or log_path,
                 name,
                 repo_id=hf_repo_id,
             )

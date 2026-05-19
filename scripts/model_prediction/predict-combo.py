@@ -55,11 +55,15 @@ ConfigStore.instance().store(name="ComboPredictScenario", node=ComboPredictScena
 def _resolve(ref) -> str:
     """Return the local folder for one role, or ``""`` if role is empty.
 
-    Struct-mode safe — older yamls that pre-date the HF fields still load.
+    Disk path wins when it exists on disk; HF download is the fallback
+    only when no local folder is present. Struct-mode safe — older
+    yamls that pre-date the HF fields still load.
     """
     log_path = OmegaConf.select(ref, "log_path", default="") or ""
     hf_repo_id = OmegaConf.select(ref, "hf_repo_id", default=None)
     hf_model_dir = OmegaConf.select(ref, "hf_model_dir", default="")
+    if log_path and Path(log_path).is_dir():
+        return log_path
     if hf_repo_id:
         name = hf_repo_id.split("/")[-1]
         return str(

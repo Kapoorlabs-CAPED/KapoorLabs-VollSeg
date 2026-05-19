@@ -158,7 +158,15 @@ class StarDistSegmenter:
         once and rerun only :func:`nms_to_labels` per candidate
         ``(prob_thresh, nms_thresh)``.
         """
+        import torch
+
         from ..stardist.inference import _predict_and_stitch
+
+        # Mirror predict_volume: resolve the device, move model + eval,
+        # so tiles and weights live on the same device.
+        device = self.device or ("cuda" if torch.cuda.is_available() else "cpu")
+        self.backbone.module.to(device)
+        self.backbone.module.eval()
 
         return _predict_and_stitch(
             self.backbone.module,
@@ -169,5 +177,5 @@ class StarDistSegmenter:
             num_workers=self.num_workers,
             pmin=self.pmin,
             pmax=self.pmax,
-            device=self.device,
+            device=device,
         )
