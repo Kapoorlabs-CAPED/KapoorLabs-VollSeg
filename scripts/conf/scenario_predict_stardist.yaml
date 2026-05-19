@@ -1,6 +1,6 @@
 defaults:
   - _self_
-  - experiment_data_paths: predict_jeanzay
+  - experiment_data_paths: predict_jeanzay_stardist
 
 parameters:
   file_type: "*.tif"

@@ -2,11 +2,13 @@
 training H5 and write the result back into the model's
 ``training_config.json`` so the predict scripts pick it up next run.
 
-Same H5 layout the trainer consumes
-(``/{train,val}/raw + /{train,val}/label``); we load the validation
-samples, run :class:`OptimizeThreshold` against the freshly-trained
-:class:`StarDistSegmenter`, and patch
-``training_config.json["parameters"]`` with the optimal pair.
+The network is run **once per validation patch** (~46 forwards) and the
+``(prob_map, dist_map)`` outputs are cached. The search grid only reruns
+the fast NMS + polyhedron-rasterise step
+(:func:`kapoorlabs_vollseg.stardist.inference.nms_to_labels`) per
+candidate ``(prob_thresh, nms_thresh)``. That's where the ~100× speed-up
+over the generic ``OptimizeThreshold`` comes from — the user's earlier
+run was stuck at 0/20 because every iteration re-ran the full network.
 
 Run::
 
@@ -24,9 +26,12 @@ import h5py
 import hydra
 import numpy as np
 from hydra.core.config_store import ConfigStore
+from scipy.optimize import minimize_scalar
+from tqdm import tqdm
 
 from kapoorlabs_vollseg import StarDistSegmenter
-from kapoorlabs_vollseg.eval import OptimizeThreshold
+from kapoorlabs_vollseg.eval.matching import matching_dataset
+from kapoorlabs_vollseg.stardist.inference import nms_to_labels
 
 from scenario_optimize_stardist_thresholds import OptimizeThresholdsScenario
 
@@ -51,7 +56,7 @@ def main(config: OptimizeThresholdsScenario):
     print(f"H5:        {h5_path}")
     print(f"log_path:  {log_path}")
 
-    # Load the (raw, label) pairs from the requested H5 split.
+    # Load (raw, label) pairs from the requested H5 split.
     n_used = int(p.max_samples)
     images, labels = [], []
     with h5py.File(h5_path, "r") as fh:
@@ -67,23 +72,75 @@ def main(config: OptimizeThresholdsScenario):
     )
 
     star = StarDistSegmenter.from_folder(log_path, n_rays=p.n_rays)
+    rays = star.backbone.rays
+    vol_shapes = [img.shape for img in images]
+    n_tiles = tuple(p.n_tiles)
 
-    opt = OptimizeThreshold(
-        star,
-        images,
-        labels,
-        nms_threshs=tuple(p.nms_threshs),
-        iou_threshs=tuple(p.iou_threshs),
-        measure=p.measure,
-        n_tiles=tuple(p.n_tiles),
-        savedir=Path(log_path),
-        normalize_inputs=p.normalize_inputs,
-        norm_axes=tuple(p.norm_axes),
+    # ───────── Stage 1: run the network once per patch, cache (prob, dist).
+    print("\nStage 1: cache network outputs (one forward per patch)…")
+    cached_maps = []
+    for img in tqdm(images, desc="forward", unit="patch"):
+        cached_maps.append(star.predict_maps(img, n_tiles=n_tiles))
+
+    # ───────── Stage 2: sweep thresholds — only NMS+rasterize is rerun.
+    nms_grid = tuple(p.nms_threshs)
+    iou_thr = tuple(p.iou_threshs)
+    measure = p.measure
+    print(f"\nStage 2: sweep NMS={nms_grid}, measure={measure!r} " f"@ IoU={iou_thr}")
+
+    best = {"prob": None, "nms": None, "score": -np.inf}
+
+    def _score(prob_thresh: float, nms_thresh: float) -> float:
+        preds = [
+            nms_to_labels(
+                prob_map,
+                dist_map,
+                rays,
+                shape,
+                prob_thresh=float(prob_thresh),
+                nms_thresh=float(nms_thresh),
+                min_distance=2,
+            )
+            for (prob_map, dist_map), shape in zip(cached_maps, vol_shapes)
+        ]
+        stats = matching_dataset(
+            labels,
+            preds,
+            thresh=iou_thr,
+            show_progress=False,
+        )
+        return float(np.mean([getattr(s, measure) for s in stats]))
+
+    for nms in nms_grid:
+        cache: dict = {}
+
+        with tqdm(total=20, desc=f"NMS = {nms:g}") as bar:
+
+            def fn(prob_thresh: float) -> float:
+                if prob_thresh in cache:
+                    return -cache[prob_thresh]
+                value = _score(prob_thresh, nms)
+                cache[prob_thresh] = value
+                bar.update()
+                bar.set_postfix_str(f"prob={prob_thresh:.3f} -> {measure}={value:.3f}")
+                return -value
+
+            opt = minimize_scalar(
+                fn,
+                method="golden",
+                tol=1e-2,
+                options={"maxiter": 20},
+            )
+        score = -opt.fun
+        if score > best["score"]:
+            best.update(prob=float(opt.x), nms=float(nms), score=score)
+
+    print(
+        f"\nBest: prob_thresh={best['prob']:.4f}  nms_thresh={best['nms']:.4f}  "
+        f"{measure}={best['score']:.4f}"
     )
-    best = opt.run()
-    print(f"\nBest: prob_thresh={best['prob']:.4f}  nms_thresh={best['nms']:.4f}")
 
-    # Patch training_config.json so predict-stardist.py picks these up.
+    # ───────── Stage 3: patch training_config.json + a sidecar thresholds.json.
     cfg_path = Path(log_path) / "training_config.json"
     if cfg_path.is_file():
         blob = json.loads(cfg_path.read_text())
@@ -94,6 +151,10 @@ def main(config: OptimizeThresholdsScenario):
     blob["parameters"]["nms_thresh"] = float(best["nms"])
     cfg_path.write_text(json.dumps(blob, indent=2))
     print(f"Wrote prob_thresh / nms_thresh into {cfg_path}")
+
+    (Path(log_path) / "thresholds.json").write_text(
+        json.dumps({"prob": float(best["prob"]), "nms": float(best["nms"])}),
+    )
 
 
 if __name__ == "__main__":

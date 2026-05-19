@@ -108,7 +108,41 @@ def predict_volume(
         device=device,
     )
 
-    # 3. Peak detection.
+    labels = nms_to_labels(
+        prob_map,
+        dist_map,
+        rays,
+        image.shape,
+        prob_thresh=prob_thresh,
+        nms_thresh=nms_thresh,
+        min_distance=min_distance,
+    )
+    return StarDistResult(
+        labels=labels,
+        prob_map=prob_map,
+        n_objects=int(labels.max()),
+    )
+
+
+def nms_to_labels(
+    prob_map: np.ndarray,
+    dist_map: np.ndarray,
+    rays: np.ndarray,
+    vol_shape: tuple,
+    *,
+    prob_thresh: float = 0.5,
+    nms_thresh: float = 0.4,
+    min_distance: int = 2,
+) -> np.ndarray:
+    """Peak-detect → rasterise → NMS → label image.
+
+    Pulled out of :func:`predict_volume` so the threshold optimiser can
+    cache the (slow) ``_predict_and_stitch`` network forward and only
+    rerun this (fast) step per ``(prob_thresh, nms_thresh)`` candidate.
+
+    Same contract as the corresponding block inside ``predict_volume``;
+    empty inputs return a zero label image.
+    """
     centers = peak_local_max(
         prob_map,
         threshold_abs=prob_thresh,
@@ -116,31 +150,22 @@ def predict_volume(
         exclude_border=False,
     )
     if centers.size == 0:
-        return StarDistResult(
-            labels=np.zeros(image.shape, dtype=np.uint16),
-            prob_map=prob_map,
-            n_objects=0,
-        )
+        return np.zeros(vol_shape, dtype=np.uint16)
 
-    # 4+5. Rasterize each candidate; greedy NMS keeps non-overlapping ones.
     scores = prob_map[tuple(centers.T)]
     dists = np.stack(
         [dist_map[(slice(None),) + tuple(c)] for c in centers], axis=0
     )  # (M, n_rays)
 
-    kept_idx, kept_bbox, kept_masks = _nms_polyhedra(
+    _, kept_bbox, kept_masks = _nms_polyhedra(
         centers=centers,
         dists=dists,
         scores=scores,
         rays=rays,
-        vol_shape=image.shape,
+        vol_shape=vol_shape,
         iou_thresh=nms_thresh,
     )
-
-    # 6. Paint surviving polyhedra into a label image.
-    labels = _paint_labels(image.shape, kept_bbox, kept_masks)
-
-    return StarDistResult(labels=labels, prob_map=prob_map, n_objects=len(kept_idx))
+    return _paint_labels(vol_shape, kept_bbox, kept_masks)
 
 
 # ============================================================= internals
@@ -232,6 +257,10 @@ def _rasterize_to_bbox(center, rays, dists, vol_shape):
     that places ``mask`` back into the full volume.
     """
     ndim = rays.shape[1]
+    # Sanitise the distance vector — degenerate model outputs sometimes
+    # have NaN / ±inf in some rays and that propagates through the
+    # bbox math and emits "invalid value encountered in cast" warnings.
+    dists = np.nan_to_num(dists, nan=0.0, posinf=0.0, neginf=0.0)
     # Bounding box: the polyhedron lies within max_dist voxels of center
     # on each axis. Use the per-axis ray×dist extent for a tight box.
     ray_extents = rays * dists[:, None]  # (n_rays, ndim)

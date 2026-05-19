@@ -81,7 +81,7 @@ def main(config: ComboPredictScenario):
     n_tiles = tuple(p.n_tiles)
 
     input_dir = os.path.join(paths.base_data_dir, paths.input_dir)
-    output_dir = Path(paths.base_data_dir) / paths.output_dir
+    output_dir = Path(paths.base_data_dir) / paths.input_dir / paths.output_dir
     output_dir.mkdir(parents=True, exist_ok=True)
 
     star_path = _resolve(paths.stardist)

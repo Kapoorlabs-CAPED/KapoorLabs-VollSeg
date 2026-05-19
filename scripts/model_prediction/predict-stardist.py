@@ -45,7 +45,7 @@ def main(config: StarDistPredictScenario):
     p = config.parameters
 
     input_dir = os.path.join(paths.base_data_dir, paths.input_dir)
-    output_dir = Path(paths.base_data_dir) / paths.output_dir
+    output_dir = Path(paths.base_data_dir) / paths.input_dir / paths.output_dir
     output_dir.mkdir(parents=True, exist_ok=True)
 
     log_path = paths.log_path

@@ -145,3 +145,29 @@ class StarDistSegmenter:
             device=self.device,
         )
         return Result(labels=sd.labels, probability=sd.prob_map)
+
+    def predict_maps(
+        self,
+        image: np.ndarray,
+        *,
+        n_tiles: Optional[tuple[int, ...]] = None,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Just the tile-and-stitch part — returns ``(prob_map, dist_map)``.
+
+        Used by the threshold optimiser to cache the slow network forward
+        once and rerun only :func:`nms_to_labels` per candidate
+        ``(prob_thresh, nms_thresh)``.
+        """
+        from ..stardist.inference import _predict_and_stitch
+
+        return _predict_and_stitch(
+            self.backbone.module,
+            image,
+            n_tiles=n_tiles if n_tiles is not None else self.n_tiles,
+            tile_overlap=self.tile_overlap,
+            batch_size=self.batch_size,
+            num_workers=self.num_workers,
+            pmin=self.pmin,
+            pmax=self.pmax,
+            device=self.device,
+        )
