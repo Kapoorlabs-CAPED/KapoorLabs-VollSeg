@@ -10,3 +10,8 @@ parameters:
   n_rays: 96              # used only if rays.npy is missing in log_path
   prob_thresh: null       # null → use the value baked into the trained module
   nms_thresh: null        # same
+
+  # Multi-GPU: set devices > 1 + strategy=ddp to T-shard a timelapse.
+  devices: 4
+  accelerator: "auto"
+  strategy: "auto"

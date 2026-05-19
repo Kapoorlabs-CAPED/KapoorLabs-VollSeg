@@ -20,7 +20,7 @@ from omegaconf import OmegaConf
 from tifffile import imread, imwrite
 from tqdm import tqdm
 
-from kapoorlabs_vollseg import UNetSegmenter, ensure_model
+from kapoorlabs_vollseg import UNetSegmenter, ensure_model, predict_timelapse
 
 from scenarios import UNetPredictScenario
 
@@ -65,15 +65,18 @@ def main(config: UNetPredictScenario):
         out_path = output_dir / basename
 
         if vol.ndim == 4:
-            labels_t = []
-            for t in tqdm(
-                range(vol.shape[0]),
-                desc=f"  {basename} (T)",
-                leave=False,
-                unit="frame",
-            ):
-                r = unet.predict(vol[t], n_tiles=n_tiles)
-                labels_t.append(r.labels.astype(np.uint16))
+            out = predict_timelapse(
+                unet,
+                vol,
+                devices=p.devices,
+                accelerator=p.accelerator,
+                strategy=p.strategy,
+                enable_progress_bar=True,
+                n_tiles=n_tiles,
+            )
+            if not out:
+                continue
+            labels_t = [out["labels"][t] for t in range(out["labels"].shape[0])]
             stacked = np.stack(labels_t, axis=0)
             imwrite(out_path, stacked)
             tqdm.write(

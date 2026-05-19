@@ -22,3 +22,8 @@ parameters:
   # Post-processing floors
   min_size_mask: 100         # remove_small_objects in the MaskUNet ROI
   min_size: 10               # remove_small_objects in the UNet output
+
+  # Multi-GPU: set devices > 1 + strategy=ddp to T-shard a timelapse.
+  devices: 4
+  accelerator: "auto"
+  strategy: "auto"

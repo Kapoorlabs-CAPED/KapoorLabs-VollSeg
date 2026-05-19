@@ -5,6 +5,7 @@ from .denoised import DenoisedPipeline
 from .factory import VollSeg
 from .nuclei_cellpose import NucleiSeededCellPosePipeline
 from .roi import ROIPipeline
+from .timelapse_predict import TimelapsePredictor, predict_timelapse
 from .unet_stardist import UNetStarDistPipeline
 
 __all__ = [
@@ -18,4 +19,6 @@ __all__ = [
     "NucleiSeededCellPosePipeline",
     "VollSeg",
     "VollCellSeg",
+    "TimelapsePredictor",
+    "predict_timelapse",
 ]

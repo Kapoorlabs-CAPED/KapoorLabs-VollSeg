@@ -67,9 +67,11 @@ from .pipelines import (
     Pipeline,
     ROIPipeline,
     Result,
+    TimelapsePredictor,
     UNetStarDistPipeline,
     VollCellSeg,
     VollSeg,
+    predict_timelapse,
 )
 from .pretrained import (
     clear_models_and_aliases,
@@ -108,6 +110,9 @@ __all__ = [
     # Layer 3
     "VollSeg",
     "VollCellSeg",
+    # Distributed timelapse prediction
+    "TimelapsePredictor",
+    "predict_timelapse",
     # shared
     "Pipeline",
     "Result",

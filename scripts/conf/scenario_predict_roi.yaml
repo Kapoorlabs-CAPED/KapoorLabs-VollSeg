@@ -8,3 +8,8 @@ parameters:
   tile_overlap: 0.125
   batch_size: 4
   min_size_mask: 100      # drop ROI regions smaller than this (px)
+
+  # Multi-GPU: set devices > 1 + strategy=ddp to T-shard a timelapse.
+  devices: 4
+  accelerator: "auto"
+  strategy: "auto"

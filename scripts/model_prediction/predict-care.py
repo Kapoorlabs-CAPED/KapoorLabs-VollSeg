@@ -19,7 +19,7 @@ from omegaconf import OmegaConf
 from tifffile import imread, imwrite
 from tqdm import tqdm
 
-from kapoorlabs_vollseg import CAREDenoiser, ensure_model
+from kapoorlabs_vollseg import CAREDenoiser, ensure_model, predict_timelapse
 
 from scenarios import CarePredictScenario
 
@@ -63,16 +63,18 @@ def main(config: CarePredictScenario):
         out_path = output_dir / basename
 
         if vol.ndim == 4:
-            denoised_t = []
-            for t in tqdm(
-                range(vol.shape[0]),
-                desc=f"  {basename} (T)",
-                leave=False,
-                unit="frame",
-            ):
-                r = care.predict(vol[t], n_tiles=n_tiles)
-                denoised_t.append(r.denoised.astype(np.float32))
-            stacked = np.stack(denoised_t, axis=0)
+            out = predict_timelapse(
+                care,
+                vol,
+                devices=p.devices,
+                accelerator=p.accelerator,
+                strategy=p.strategy,
+                enable_progress_bar=True,
+                n_tiles=n_tiles,
+            )
+            if not out:
+                continue
+            stacked = out["denoised"].astype(np.float32)
             imwrite(out_path, stacked)
             tqdm.write(f"  → {out_path}   shape={stacked.shape}")
         else:

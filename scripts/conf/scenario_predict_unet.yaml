@@ -8,3 +8,8 @@ parameters:
   tile_overlap: 0.125
   batch_size: 4
   min_size: 10            # remove_small_objects floor for CC instance labels
+
+  # Multi-GPU: set devices > 1 + strategy=ddp to T-shard a timelapse.
+  devices: 4
+  accelerator: "auto"
+  strategy: "auto"

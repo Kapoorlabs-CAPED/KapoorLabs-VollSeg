@@ -7,3 +7,8 @@ parameters:
   n_tiles: [1, 4, 4]
   tile_overlap: 0.125
   batch_size: 4
+
+  # Multi-GPU: set devices > 1 + strategy=ddp to T-shard a timelapse.
+  devices: 1
+  accelerator: "auto"
+  strategy: "auto"

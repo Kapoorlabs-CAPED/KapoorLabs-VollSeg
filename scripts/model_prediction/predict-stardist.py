@@ -26,7 +26,7 @@ from omegaconf import OmegaConf
 from tifffile import imread, imwrite
 from tqdm import tqdm
 
-from kapoorlabs_vollseg import StarDistSegmenter, ensure_model
+from kapoorlabs_vollseg import StarDistSegmenter, ensure_model, predict_timelapse
 
 from scenarios import StarDistPredictScenario
 
@@ -74,22 +74,23 @@ def main(config: StarDistPredictScenario):
         vol = imread(f)
         out_path = output_dir / basename
 
-        # 4D = TZYX timelapse → iterate over T and stack along T at write time.
+        # 4D = TZYX timelapse → Lightning Trainer.predict shards T across
+        # `devices` GPUs (DDP-style) and stacks the per-frame Result fields.
         if vol.ndim == 4:
-            labels_t = []
-            for t in tqdm(
-                range(vol.shape[0]),
-                desc=f"  {basename} (T)",
-                leave=False,
-                unit="frame",
-            ):
-                r = star.predict(
-                    vol[t],
-                    prob_thresh=p.prob_thresh,
-                    nms_thresh=p.nms_thresh,
-                    n_tiles=n_tiles,
-                )
-                labels_t.append(r.labels.astype(np.uint32))
+            out = predict_timelapse(
+                star,
+                vol,
+                devices=p.devices,
+                accelerator=p.accelerator,
+                strategy=p.strategy,
+                enable_progress_bar=True,
+                prob_thresh=p.prob_thresh,
+                nms_thresh=p.nms_thresh,
+                n_tiles=n_tiles,
+            )
+            if not out:
+                continue  # non-zero DDP rank
+            labels_t = [out["labels"][t] for t in range(out["labels"].shape[0])]
             stacked = np.stack(labels_t, axis=0)
             imwrite(out_path, stacked)
             tqdm.write(

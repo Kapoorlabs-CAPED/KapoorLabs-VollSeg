@@ -42,6 +42,7 @@ from kapoorlabs_vollseg import (
     UNetSegmenter,
     VollSeg,
     ensure_model,
+    predict_timelapse,
 )
 
 from scenarios import ComboPredictScenario
@@ -117,35 +118,37 @@ def main(config: ComboPredictScenario):
         basename = os.path.basename(f)
         vol = imread(f)
 
-        # 4D = TZYX timelapse → iterate over T; everything else passes through.
+        # 4D = TZYX timelapse → Lightning Trainer.predict shards T across
+        # `devices` GPUs (DDP) and gathers per-frame Result fields.
         if vol.ndim == 4:
-            labels_t, semantic_t, roi_t = [], [], []
-            for t in tqdm(
-                range(vol.shape[0]),
-                desc=f"  {basename} (T)",
-                leave=False,
-                unit="frame",
-            ):
-                r = pipe.predict(
-                    vol[t],
-                    prob_thresh=p.prob_thresh,
-                    nms_thresh=p.nms_thresh,
-                    n_tiles=n_tiles,
-                )
-                if r.labels is not None:
-                    labels_t.append(r.labels.astype(np.uint32))
-                if r.semantic is not None:
-                    semantic_t.append(r.semantic.astype(np.uint8))
-                if r.roi is not None:
-                    roi_t.append(r.roi.astype(np.uint8))
-            if labels_t:
-                imwrite(output_dir / f"labels_{basename}", np.stack(labels_t, axis=0))
-            if semantic_t:
+            out = predict_timelapse(
+                pipe,
+                vol,
+                devices=p.devices,
+                accelerator=p.accelerator,
+                strategy=p.strategy,
+                enable_progress_bar=True,
+                prob_thresh=p.prob_thresh,
+                nms_thresh=p.nms_thresh,
+                n_tiles=n_tiles,
+            )
+            if not out:
+                continue  # non-zero DDP rank
+            if "labels" in out:
                 imwrite(
-                    output_dir / f"semantic_{basename}", np.stack(semantic_t, axis=0)
+                    output_dir / f"labels_{basename}",
+                    out["labels"].astype(np.uint32),
                 )
-            if roi_t:
-                imwrite(output_dir / f"roi_{basename}", np.stack(roi_t, axis=0))
+            if "semantic" in out:
+                imwrite(
+                    output_dir / f"semantic_{basename}",
+                    out["semantic"].astype(np.uint8),
+                )
+            if "roi" in out:
+                imwrite(
+                    output_dir / f"roi_{basename}",
+                    out["roi"].astype(np.uint8),
+                )
         else:
             r = pipe.predict(
                 vol,
