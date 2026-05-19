@@ -29,6 +29,12 @@ class StarDistBackbone:
         self.module = module
         self.module.eval()
         self.rays = np.ascontiguousarray(rays, dtype=np.float32)
+        # Triangulated faces of the polyhedron (3D only; empty for 2D) —
+        # the inference rasteriser uses these to build the actual
+        # star-convex polyhedron, instead of a nearest-ray cone union.
+        from ..stardist.rays import compute_faces
+
+        self.faces = compute_faces(self.rays)
 
     @classmethod
     def from_checkpoint(

@@ -77,6 +77,7 @@ def main(config: OptimizeThresholdsScenario):
 
     star = StarDistSegmenter.from_folder(log_path, n_rays=p.n_rays)
     rays = star.backbone.rays
+    faces = getattr(star.backbone, "faces", None)
     vol_shapes = [img.shape for img in images]
     n_tiles = tuple(p.n_tiles)
 
@@ -106,6 +107,7 @@ def main(config: OptimizeThresholdsScenario):
                 shape,
                 min_prob=min_prob,
                 min_distance=2,
+                faces=faces,
             )
         )
 

@@ -143,6 +143,7 @@ class StarDistSegmenter:
             pmin=self.pmin,
             pmax=self.pmax,
             device=self.device,
+            faces=getattr(self.backbone, "faces", None),
         )
         return Result(labels=sd.labels, probability=sd.prob_map)
 

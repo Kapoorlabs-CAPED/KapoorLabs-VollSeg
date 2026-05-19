@@ -60,6 +60,7 @@ def predict_volume(
     pmin: Optional[float] = 0.1,
     pmax: Optional[float] = 99.9,
     device: Optional[str] = None,
+    faces: Optional[np.ndarray] = None,
 ) -> StarDistResult:
     """Run StarDist inference end-to-end on a single 3D (or 2D) volume.
 
@@ -116,6 +117,7 @@ def predict_volume(
         prob_thresh=prob_thresh,
         nms_thresh=nms_thresh,
         min_distance=min_distance,
+        faces=faces,
     )
     return StarDistResult(
         labels=labels,
@@ -132,6 +134,7 @@ def precompute_peaks_and_masks(
     *,
     min_prob: float = 0.01,
     min_distance: int = 2,
+    faces: Optional[np.ndarray] = None,
 ):
     """Detect + rasterise once at the **lowest** ``prob_thresh`` the sweep
     will ever try, so the threshold optimiser can reuse the same masks
@@ -159,7 +162,7 @@ def precompute_peaks_and_masks(
 
     bboxes, masks = [], []
     for c, d in zip(centers, dists):
-        bbox, mask = _rasterize_to_bbox(c, rays, d, vol_shape)
+        bbox, mask = _rasterize_to_bbox(c, rays, d, vol_shape, faces=faces)
         bboxes.append(bbox)
         masks.append(mask)
     return centers, scores, bboxes, masks
@@ -210,6 +213,7 @@ def nms_to_labels(
     prob_thresh: float = 0.5,
     nms_thresh: float = 0.4,
     min_distance: int = 2,
+    faces: Optional[np.ndarray] = None,
 ) -> np.ndarray:
     """Peak-detect → rasterise → NMS → label image.
 
@@ -241,6 +245,7 @@ def nms_to_labels(
         rays=rays,
         vol_shape=vol_shape,
         iou_thresh=nms_thresh,
+        faces=faces,
     )
     return _paint_labels(vol_shape, kept_bbox, kept_masks)
 
@@ -326,12 +331,20 @@ def _make_blend_weight(ndim, tile_shape, overlap_fraction):
 # --------------------------------------------------------- rasterization
 
 
-def _rasterize_to_bbox(center, rays, dists, vol_shape):
+def _rasterize_to_bbox(center, rays, dists, vol_shape, faces=None):
     """Return ``(bbox_slices, mask)`` for the star polyhedron at ``center``.
 
-    ``mask`` is a boolean array sized to fit the polyhedron's bounding
-    box (clipped to the volume); ``bbox_slices`` is the per-axis slice
-    that places ``mask`` back into the full volume.
+    Two paths:
+
+    - **3D + faces given**: rasterise the **true triangulated star-convex
+      polyhedron** as the union of tetrahedra
+      ``(center, d_a·v_a, d_b·v_b, d_c·v_c)`` for each ConvexHull triangle
+      face ``(a, b, c)`` of the rays. Same surface keras stardist
+      reconstructs via ``polyhedron_to_label``.
+    - **2D (or no faces)**: fall back to the legacy nearest-ray cone
+      approximation — for 2D this is essentially exact when ``n_rays``
+      is reasonable, and it's the only path that doesn't need a
+      triangulation.
     """
     ndim = rays.shape[1]
     # Sanitise the distance vector — degenerate model outputs sometimes
@@ -356,25 +369,85 @@ def _rasterize_to_bbox(center, rays, dists, vol_shape):
     axes = [np.arange(lo[d], hi[d]) - center[d] for d in range(ndim)]
     grids = np.meshgrid(*axes, indexing="ij")  # ndim arrays of bbox shape
     coords = np.stack([g.ravel() for g in grids], axis=1).astype(
-        np.float32
+        np.float64
     )  # (M, ndim)
 
-    norm = np.linalg.norm(coords, axis=1)  # (M,)
-    safe = norm > 1e-6
-    # Unit vectors from center to each voxel.
-    unit = np.zeros_like(coords)
-    unit[safe] = coords[safe] / norm[safe, None]
+    if ndim == 3 and faces is not None and len(faces) > 0:
+        inside = _inside_polyhedron(coords, rays, dists, faces)
+    else:
+        # 2D / no-faces fallback: nearest-ray cone test.
+        norm = np.linalg.norm(coords, axis=1)
+        safe = norm > 1e-6
+        unit = np.zeros_like(coords)
+        unit[safe] = coords[safe] / norm[safe, None]
+        ray_norm = rays / np.linalg.norm(rays, axis=1, keepdims=True)
+        dots = unit @ ray_norm.T
+        nearest = np.argmax(dots, axis=1)
+        inside = norm <= dists[nearest]
+        inside |= ~safe  # the center itself is in
 
-    # Ray directions, normalized.
-    ray_norm = rays / np.linalg.norm(rays, axis=1, keepdims=True)
-    # Pick the nearest ray (largest dot product) for each voxel.
-    dots = unit @ ray_norm.T  # (M, n_rays)
-    nearest = np.argmax(dots, axis=1)  # (M,)
-    inside = norm <= dists[nearest]
-    inside |= ~safe  # the center itself is in
     mask = inside.reshape(grids[0].shape)
     bbox_slices = tuple(slice(int(lo[d]), int(hi[d])) for d in range(ndim))
     return bbox_slices, mask
+
+
+def _inside_polyhedron(coords, rays, dists, faces):
+    """Vectorised "voxel-in-star-polyhedron" test for 3D.
+
+    Decomposes the star-convex polyhedron into tetrahedra — one per
+    triangle face of the boundary, with the center (origin in the
+    ``coords`` frame) as the apex. A voxel is inside the polyhedron iff
+    it lies inside at least one such tetrahedron, i.e. its barycentric
+    coordinates ``(w_a, w_b, w_c, w_origin = 1 - w_a - w_b - w_c)`` w.r.t
+    the four corners are all non-negative.
+
+    ``coords`` are voxel offsets from the polyhedron center; returns a
+    flat bool array of length ``len(coords)``.
+    """
+    n_faces = faces.shape[0]
+    n_vox = coords.shape[0]
+    if n_faces == 0 or n_vox == 0:
+        out = np.zeros(n_vox, dtype=bool)
+        if n_vox > 0:
+            # Center voxel is always inside.
+            out |= np.linalg.norm(coords, axis=1) <= 1e-6
+        return out
+
+    # Scaled face vertices, shape (n_faces, 3, 3): the (i, j, :) entry is
+    # the j-th scaled ray of face i, expressed in (z, y, x).
+    scaled = rays * dists[:, None]  # (n_rays, 3)
+    face_verts = scaled[faces]  # (n_faces, 3, 3)
+
+    # Matrix M_f with columns = scaled vertices; inverting it gives the
+    # transform world -> barycentric (origin-relative).
+    M = face_verts.transpose(0, 2, 1)  # (n_faces, 3, 3): columns = vertices
+    try:
+        Minv = np.linalg.inv(M)  # (n_faces, 3, 3)
+    except np.linalg.LinAlgError:
+        # Degenerate face — skip the whole rasterisation cleanly.
+        return np.zeros(n_vox, dtype=bool)
+
+    tol = -1e-9
+    inside = np.zeros(n_vox, dtype=bool)
+    # Chunk voxels to keep the (n_faces, chunk, 3) tensor's memory bounded.
+    # For n_faces=188 (n_rays=96) and chunk=4096, that's ~18 MB per chunk.
+    chunk = 4096
+    for s in range(0, n_vox, chunk):
+        v = coords[s : s + chunk]  # (k, 3)
+        # w[f, m, i] = barycentric coord of voxel m in tetrahedron of face f.
+        w = np.einsum("fij,mj->fmi", Minv, v)  # (n_faces, k, 3)
+        w_origin = 1.0 - w.sum(axis=-1)
+        ok = (
+            (w[..., 0] >= tol)
+            & (w[..., 1] >= tol)
+            & (w[..., 2] >= tol)
+            & (w_origin >= tol)
+        )  # (n_faces, k)
+        inside[s : s + chunk] = ok.any(axis=0)
+
+    # The center itself is always part of the polyhedron.
+    inside |= np.linalg.norm(coords, axis=1) <= 1e-6
+    return inside
 
 
 def _bbox_iou(bbox_a, mask_a, bbox_b, mask_b) -> float:
@@ -397,12 +470,14 @@ def _bbox_iou(bbox_a, mask_a, bbox_b, mask_b) -> float:
     return float(inter) / float(union)
 
 
-def _nms_polyhedra(*, centers, dists, scores, rays, vol_shape, iou_thresh):
+def _nms_polyhedra(*, centers, dists, scores, rays, vol_shape, iou_thresh, faces=None):
     """Greedy NMS — sort by descending score, drop those overlapping kept ones."""
     order = np.argsort(-scores)
     kept_idx, kept_bbox, kept_masks = [], [], []
     for i in order:
-        bbox_i, mask_i = _rasterize_to_bbox(centers[i], rays, dists[i], vol_shape)
+        bbox_i, mask_i = _rasterize_to_bbox(
+            centers[i], rays, dists[i], vol_shape, faces=faces
+        )
         if not mask_i.any():
             continue
         suppress = False
