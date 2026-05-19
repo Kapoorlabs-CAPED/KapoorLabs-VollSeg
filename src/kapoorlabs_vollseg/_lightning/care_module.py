@@ -73,11 +73,37 @@ class CareModule(BaseModule):
     # ------------------------------------------------------- prediction
 
     def predict_step(self, batch, batch_idx):
-        """Return ``(predicted_tile, coords)`` for stitching downstream."""
+        """Return ``(predicted_tile, coords)`` for stitching downstream.
+
+        Pads each tile so every spatial dim is divisible by ``2**depth``
+        before feeding the CAREamics UNet (its decoder concats skip
+        connections that fail on odd sizes), then crops the output back
+        to the tile's original spatial shape.
+        """
+        import torch.nn.functional as F
+
         tiles, coords = batch
         tiles = tiles.unsqueeze(1)
+
+        # Try to read depth from the wrapped network (matches StarDistUNet
+        # and the careamics UNet shape). Default 3 = current trainer default.
+        depth = int(getattr(self.network, "depth", 3))
+        divisor = 2**depth
+        orig_spatial = tuple(tiles.shape[2:])
+        pads = []  # F.pad: last dim first
+        for s in reversed(orig_spatial):
+            extra = (divisor - s % divisor) % divisor
+            pads.extend([0, extra])
+        if any(pads):
+            tiles = F.pad(tiles, pads, mode="replicate")
+
         with torch.no_grad():
             predicted = self(tiles)
+
+        if any(pads):
+            crop = (slice(None), slice(None)) + tuple(slice(0, s) for s in orig_spatial)
+            predicted = predicted[crop]
+
         predicted = predicted.squeeze(1)
         return predicted.cpu(), coords.cpu()
 

@@ -75,6 +75,7 @@ class StarDistUNet(nn.Module):
             raise ValueError(f"conv_dims must be 2 or 3, got {conv_dims}")
         self.n_rays = int(n_rays)
         self.conv_dims = conv_dims
+        self.depth = int(depth)  # exposed for runtime pad-to-divisible
 
         self.trunk, feat = _build_trunk(
             conv_dims=conv_dims,

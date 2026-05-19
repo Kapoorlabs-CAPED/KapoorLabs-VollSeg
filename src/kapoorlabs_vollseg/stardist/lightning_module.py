@@ -103,7 +103,28 @@ class StarDistModule(BaseModule):
         tiles, coords = batch
         if tiles.dim() == self.conv_dims + 1:  # (B, *spatial) — add channel
             tiles = tiles.unsqueeze(1)
+
+        # CAREamics UNet skip-connection concat requires every spatial
+        # dim to be divisible by 2**depth. Pad here, run forward, crop
+        # the outputs back to the tile's original spatial shape.
+        import torch.nn.functional as F
+
+        divisor = 2 ** int(getattr(self.network, "depth", 3))
+        orig_spatial = tuple(tiles.shape[2:])
+        pads = []  # F.pad: last dim first
+        for s in reversed(orig_spatial):
+            extra = (divisor - s % divisor) % divisor
+            pads.extend([0, extra])
+        if any(pads):
+            tiles = F.pad(tiles, pads, mode="replicate")
+
         with torch.no_grad():
             prob_logits, dists = self(tiles)
+
+        if any(pads):
+            crop = (slice(None), slice(None)) + tuple(slice(0, s) for s in orig_spatial)
+            prob_logits = prob_logits[crop]
+            dists = dists[crop]
+
         prob = torch.sigmoid(prob_logits)
         return prob.cpu(), dists.cpu(), coords.cpu()
