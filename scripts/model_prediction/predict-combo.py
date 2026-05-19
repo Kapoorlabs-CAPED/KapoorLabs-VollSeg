@@ -34,6 +34,7 @@ import numpy as np
 from hydra.core.config_store import ConfigStore
 from omegaconf import OmegaConf
 from tifffile import imread, imwrite
+from tqdm import tqdm
 
 from kapoorlabs_vollseg import (
     MaskUNetSegmenter,
@@ -112,16 +113,19 @@ def main(config: ComboPredictScenario):
     files = sorted(glob(os.path.join(input_dir, p.file_type)))
     print(f"Found {len(files)} input file(s) — predicting with n_tiles={n_tiles}")
 
-    for f in files:
+    for f in tqdm(files, desc="files", unit="file"):
         basename = os.path.basename(f)
-        print(f"\n{basename}")
         vol = imread(f)
 
         # 4D = TZYX timelapse → iterate over T; everything else passes through.
         if vol.ndim == 4:
-            print(f"  timelapse: {vol.shape[0]} frames of {vol.shape[1:]}")
             labels_t, semantic_t, roi_t = [], [], []
-            for t in range(vol.shape[0]):
+            for t in tqdm(
+                range(vol.shape[0]),
+                desc=f"  {basename} (T)",
+                leave=False,
+                unit="frame",
+            ):
                 r = pipe.predict(
                     vol[t],
                     prob_thresh=p.prob_thresh,

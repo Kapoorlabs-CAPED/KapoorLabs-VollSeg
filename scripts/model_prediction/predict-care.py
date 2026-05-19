@@ -17,6 +17,7 @@ import numpy as np
 from hydra.core.config_store import ConfigStore
 from omegaconf import OmegaConf
 from tifffile import imread, imwrite
+from tqdm import tqdm
 
 from kapoorlabs_vollseg import CAREDenoiser, ensure_model
 
@@ -56,17 +57,28 @@ def main(config: CarePredictScenario):
 
     files = sorted(glob(os.path.join(input_dir, p.file_type)))
     print(f"Found {len(files)} input file(s) — denoising with n_tiles={n_tiles}")
-    for f in files:
+    for f in tqdm(files, desc="files", unit="file"):
         basename = os.path.basename(f)
-        print(f"\n{basename}")
         vol = imread(f)
-        if vol.ndim == 4:
-            vol = vol[0]
-        print(f"  input shape: {vol.shape}")
-        result = care.predict(vol, n_tiles=n_tiles)
         out_path = output_dir / basename
-        imwrite(out_path, result.denoised.astype(np.float32))
-        print(f"  → {out_path}")
+
+        if vol.ndim == 4:
+            denoised_t = []
+            for t in tqdm(
+                range(vol.shape[0]),
+                desc=f"  {basename} (T)",
+                leave=False,
+                unit="frame",
+            ):
+                r = care.predict(vol[t], n_tiles=n_tiles)
+                denoised_t.append(r.denoised.astype(np.float32))
+            stacked = np.stack(denoised_t, axis=0)
+            imwrite(out_path, stacked)
+            tqdm.write(f"  → {out_path}   shape={stacked.shape}")
+        else:
+            result = care.predict(vol, n_tiles=n_tiles)
+            imwrite(out_path, result.denoised.astype(np.float32))
+            tqdm.write(f"  → {out_path}")
 
     print("\nDone.")
 

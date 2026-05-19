@@ -24,6 +24,7 @@ import numpy as np
 from hydra.core.config_store import ConfigStore
 from omegaconf import OmegaConf
 from tifffile import imread, imwrite
+from tqdm import tqdm
 
 from kapoorlabs_vollseg import StarDistSegmenter, ensure_model
 
@@ -68,22 +69,42 @@ def main(config: StarDistPredictScenario):
 
     files = sorted(glob(os.path.join(input_dir, p.file_type)))
     print(f"Found {len(files)} input file(s) — predicting with n_tiles={n_tiles}")
-    for f in files:
+    for f in tqdm(files, desc="files", unit="file"):
         basename = os.path.basename(f)
-        print(f"\n{basename}")
         vol = imread(f)
-        if vol.ndim == 4:
-            vol = vol[0]
-        print(f"  input shape: {vol.shape}")
-        result = star.predict(
-            vol,
-            prob_thresh=p.prob_thresh,
-            nms_thresh=p.nms_thresh,
-            n_tiles=n_tiles,
-        )
         out_path = output_dir / basename
-        imwrite(out_path, result.labels.astype(np.uint32))
-        print(f"  → {out_path}   ({int(result.labels.max())} instances)")
+
+        # 4D = TZYX timelapse → iterate over T and stack along T at write time.
+        if vol.ndim == 4:
+            labels_t = []
+            for t in tqdm(
+                range(vol.shape[0]),
+                desc=f"  {basename} (T)",
+                leave=False,
+                unit="frame",
+            ):
+                r = star.predict(
+                    vol[t],
+                    prob_thresh=p.prob_thresh,
+                    nms_thresh=p.nms_thresh,
+                    n_tiles=n_tiles,
+                )
+                labels_t.append(r.labels.astype(np.uint32))
+            stacked = np.stack(labels_t, axis=0)
+            imwrite(out_path, stacked)
+            tqdm.write(
+                f"  → {out_path}   shape={stacked.shape}, "
+                f"max instances/frame={max(int(x.max()) for x in labels_t)}"
+            )
+        else:
+            result = star.predict(
+                vol,
+                prob_thresh=p.prob_thresh,
+                nms_thresh=p.nms_thresh,
+                n_tiles=n_tiles,
+            )
+            imwrite(out_path, result.labels.astype(np.uint32))
+            tqdm.write(f"  → {out_path}   ({int(result.labels.max())} instances)")
 
     print("\nDone.")
 
