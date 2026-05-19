@@ -1,7 +1,7 @@
 """One-shot helper: upload the freshly-trained PyTorch StarDist / U-Net
 folders to public HuggingFace model repos under the ``KapoorLabs`` org.
 
-Sibling of :mod:`scripts/segmentation_workflow/_upload_models_to_hf.py`
+Sibling of :mod:`scripts/legacy_segmentation_workflow/_upload_models_to_hf.py`
 (which migrated the legacy keras Xenopus zoo); this one targets the
 new PyTorch-Lightning checkpoints written by ``StarDistTrainer`` /
 ``UNetTrainer`` (flat layout: ``last.ckpt`` + ``rays.npy`` +

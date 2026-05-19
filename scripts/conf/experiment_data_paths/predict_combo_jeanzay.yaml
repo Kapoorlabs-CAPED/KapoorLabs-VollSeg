@@ -7,15 +7,15 @@ output_dir: combo
 # repo (hf_repo_id) works — same contract as the singleton scripts.
 stardist:
   log_path: "/lustre/fsn1/projects/rech/jsy/uzj81mi/models_stardist_pytorch/"
-  hf_repo_id: null            # e.g. "KapoorLabs/xenopus-stardist-pytorch"
+  hf_repo_id: "KapoorLabs/xenopus-stardist-pytorch"
   hf_model_dir: ""
 
 unet:
   log_path: "/lustre/fsn1/projects/rech/jsy/uzj81mi/models_unet_pytorch/"
-  hf_repo_id: null
+  hf_repo_id: "KapoorLabs/xenopus-unet-pytorch"
   hf_model_dir: ""
 
 maskunet:
   log_path: "/lustre/fsn1/projects/rech/jsy/uzj81mi/models_maskunet_pytorch/"
-  hf_repo_id: null
+  hf_repo_id: "KapoorLabs/xenopus-maskunet-pytorch"
   hf_model_dir: ""

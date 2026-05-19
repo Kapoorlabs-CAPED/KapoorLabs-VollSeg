@@ -22,6 +22,7 @@ from pathlib import Path
 import hydra
 import numpy as np
 from hydra.core.config_store import ConfigStore
+from omegaconf import OmegaConf
 from tifffile import imread, imwrite
 
 from kapoorlabs_vollseg import StarDistSegmenter, ensure_model
@@ -46,13 +47,15 @@ def main(config: StarDistPredictScenario):
     output_dir.mkdir(parents=True, exist_ok=True)
 
     log_path = paths.log_path
-    if paths.hf_repo_id:
-        name = paths.hf_repo_id.split("/")[-1]
+    hf_repo_id = OmegaConf.select(paths, "hf_repo_id", default=None)
+    hf_model_dir = OmegaConf.select(paths, "hf_model_dir", default="")
+    if hf_repo_id:
+        name = hf_repo_id.split("/")[-1]
         log_path = str(
             ensure_model(
-                paths.hf_model_dir or paths.log_path,
+                hf_model_dir or paths.log_path,
                 name,
-                repo_id=paths.hf_repo_id,
+                repo_id=hf_repo_id,
             )
         )
     print(f"Loading StarDist from {log_path}")

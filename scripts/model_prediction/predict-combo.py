@@ -32,6 +32,7 @@ from pathlib import Path
 import hydra
 import numpy as np
 from hydra.core.config_store import ConfigStore
+from omegaconf import OmegaConf
 from tifffile import imread, imwrite
 
 from kapoorlabs_vollseg import (
@@ -42,24 +43,30 @@ from kapoorlabs_vollseg import (
     ensure_model,
 )
 
-from scenarios import ComboPredictScenario, ModelRef
+from scenarios import ComboPredictScenario
 
 
 ConfigStore.instance().store(name="ComboPredictScenario", node=ComboPredictScenario)
 
 
-def _resolve(ref: ModelRef) -> str:
-    """Return the local folder for one role, or ``""`` if role is empty."""
-    if ref.hf_repo_id:
-        name = ref.hf_repo_id.split("/")[-1]
+def _resolve(ref) -> str:
+    """Return the local folder for one role, or ``""`` if role is empty.
+
+    Struct-mode safe — older yamls that pre-date the HF fields still load.
+    """
+    log_path = OmegaConf.select(ref, "log_path", default="") or ""
+    hf_repo_id = OmegaConf.select(ref, "hf_repo_id", default=None)
+    hf_model_dir = OmegaConf.select(ref, "hf_model_dir", default="")
+    if hf_repo_id:
+        name = hf_repo_id.split("/")[-1]
         return str(
             ensure_model(
-                ref.hf_model_dir or ref.log_path,
+                hf_model_dir or log_path,
                 name,
-                repo_id=ref.hf_repo_id,
+                repo_id=hf_repo_id,
             )
         )
-    return ref.log_path or ""
+    return log_path
 
 
 @hydra.main(
