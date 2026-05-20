@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "kapoorlabs-vollseg"
-version = "1.0.0"
+dynamic = ["version"]
 description = "Hierarchical, composable segmentation for biological image data (clean rewrite of VollSeg)."
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -88,3 +88,7 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 "*" = ["*.yaml"]
+
+[tool.setuptools_scm]
+write_to = "src/kapoorlabs_vollseg/_version.py"
+fallback_version = "0.0.0"
