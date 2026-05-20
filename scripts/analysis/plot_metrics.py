@@ -3,9 +3,13 @@ from pathlib import Path
 import itertools
 
 import matplotlib.pyplot as plt
+import matplotlib
+
+
 import numpy as np
 import pandas as pd
 
+matplotlib.use("agg")
 
 # Mirror upstream's bokeh.palettes.Category10[10] without adding a
 # bokeh dependency — matplotlib's 'tab10' is the same palette.
