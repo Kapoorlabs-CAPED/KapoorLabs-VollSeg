@@ -22,6 +22,7 @@ from typing import Any, Optional
 
 import numpy as np
 import torch
+import torch.distributed as dist
 from lightning import LightningModule, Trainer
 from torch.utils.data import DataLoader, Dataset
 
@@ -147,8 +148,6 @@ def predict_timelapse(
     # frames and the other ranks clobber that same file with their own
     # shard.
     per_frame = [d for d in per_frame if d is not None]
-
-    import torch.distributed as dist
 
     if dist.is_available() and dist.is_initialized():
         world_size = dist.get_world_size()

@@ -14,6 +14,7 @@ import numpy as np
 
 from ..stardist.lightning_module import StarDistModule
 from ..stardist.model import StarDistUNet
+from ..stardist.rays import compute_faces
 
 
 class StarDistBackbone:
@@ -32,8 +33,6 @@ class StarDistBackbone:
         # Triangulated faces of the polyhedron (3D only; empty for 2D) —
         # the inference rasteriser uses these to build the actual
         # star-convex polyhedron, instead of a nearest-ray cone union.
-        from ..stardist.rays import compute_faces
-
         self.faces = compute_faces(self.rays)
 
     @classmethod

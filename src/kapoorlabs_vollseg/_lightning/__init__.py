@@ -7,7 +7,6 @@ porting future trainers stays mechanical.
 """
 
 from .base_module import BaseModule
-from .care_module import CareModule
 from .dataset import CarePredictionDataset, compute_tile_shape
 from .stitch import stitch_tiles
 from .transforms import PercentileNormalize, ToFloat32
@@ -15,7 +14,6 @@ from .unet_dataset import H5UNetDataset, unet_collate
 
 __all__ = [
     "BaseModule",
-    "CareModule",
     "CarePredictionDataset",
     "compute_tile_shape",
     "stitch_tiles",

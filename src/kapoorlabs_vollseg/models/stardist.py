@@ -13,10 +13,17 @@ from pathlib import Path
 from typing import Optional, Union
 
 import numpy as np
+import torch
 
+from .._backbones._config import (
+    find_checkpoint,
+    find_rays,
+    read_training_config,
+)
 from .._backbones.stardist import StarDistBackbone
 from ..pipelines.base import Result
-from ..stardist.inference import predict_volume
+from ..stardist.inference import _predict_and_stitch, predict_volume
+from ..stardist.rays import rays_3d_golden_spiral
 
 
 class StarDistSegmenter:
@@ -100,13 +107,6 @@ class StarDistSegmenter:
         not passed, the loader looks for ``rays.npy`` / ``*rays*.npy`` in
         the folder; if neither exists it generates a fresh golden-spiral
         set of length ``n_rays``."""
-        from .._backbones._config import (
-            find_checkpoint,
-            find_rays,
-            read_training_config,
-        )
-        from ..stardist.rays import rays_3d_golden_spiral
-
         ckpt = find_checkpoint(folder)
         arch = read_training_config(folder)
         arch.update(kwargs)
@@ -159,10 +159,6 @@ class StarDistSegmenter:
         once and rerun only :func:`nms_to_labels` per candidate
         ``(prob_thresh, nms_thresh)``.
         """
-        import torch
-
-        from ..stardist.inference import _predict_and_stitch
-
         # Mirror predict_volume: resolve the device, move model + eval,
         # so tiles and weights live on the same device.
         device = self.device or ("cuda" if torch.cuda.is_available() else "cpu")

@@ -18,7 +18,7 @@ import torch
 import torch.nn as nn
 
 from .._backbones.care import _build_unet
-from .._lightning.care_module import CareModule
+from ..care_lightning.module import CareModule
 
 
 class CARETrainer:

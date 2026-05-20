@@ -17,7 +17,7 @@ from typing import Optional, Union
 
 import torch
 
-from .._lightning.care_module import CareModule
+from ..care_lightning.module import CareModule
 from .care import _build_unet, infer_arch_from_checkpoint
 
 

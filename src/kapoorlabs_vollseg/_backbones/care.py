@@ -20,7 +20,7 @@ from typing import Optional, Union
 
 import torch
 
-from .._lightning.care_module import CareModule
+from ..care_lightning.module import CareModule
 
 
 def _build_unet(
