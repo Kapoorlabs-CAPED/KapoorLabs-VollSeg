@@ -17,7 +17,7 @@ def plot_csv_files_interactive(
     unwanted_substrings=("gpu", "memory"),
     page_output_dir="metrics",
     save_plots=False,
-    show_plots=True,
+    show_plots=False,
 ):
     """Read ``metrics.csv`` from ``csv_directory`` and plot every metric
     column in a 4-column grid — same style as
