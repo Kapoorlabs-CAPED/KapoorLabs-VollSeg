@@ -16,7 +16,7 @@ def plot_csv_files_interactive(
     csv_directory,
     unwanted_substrings=("gpu", "memory"),
     page_output_dir="metrics",
-    save_plots=False,
+    save_plots=True,
     show_plots=False,
 ):
     """Read ``metrics.csv`` from ``csv_directory`` and plot every metric
