@@ -1,24 +1,26 @@
-"""Lightning training entry point for U-Net (PyTorch first-class).
+"""U-Net training — pure :class:`TrainingPipeline` invocation.
 
-Reads an H5 produced by ``generate-unet-training-data.py`` (streaming
-``raw + mask`` patches) and trains via :class:`kapoorlabs_vollseg.UNetTrainer`. The
-shape mirrors KapoorLabs-Lightning's ``lightning-roi.py`` — same Hydra
-schema convention — but uses our in-repo PyTorch trainer instead of
-``CareInception``.
+Same shape as ``lightning-stardist`` / ``lightning-care``: hydra config
+→ sequence of ``setup_*`` calls → ``train()``. No per-task trainer
+façade, no hand-rolled dataloaders — the pipeline owns transforms,
+datasets, dataloaders, optimizer, scheduler, module, callbacks, logger,
+and the Lightning fit loop.
+
+Reads an H5 produced by ``generate-unet-training-data.py`` — streaming
+``raw + mask`` patches.
 """
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 
 import hydra
-import torch
 from hydra.core.config_store import ConfigStore
-from torch.utils.data import DataLoader
+from omegaconf import OmegaConf
 
-from kapoorlabs_vollseg import UNetTrainer
-from kapoorlabs_vollseg._lightning import H5UNetDataset, unet_collate
+from kapoorlabs_vollseg.training import TrainingPipeline
 
 from scenario_train_unet import UNetTrainScenario
 
@@ -26,88 +28,97 @@ from scenario_train_unet import UNetTrainScenario
 ConfigStore.instance().store(name="UNetTrainScenario", node=UNetTrainScenario)
 
 
-def _percentile_normalize(raw: torch.Tensor, pmin: float, pmax: float) -> torch.Tensor:
-    flat = raw.flatten()
-    lo = torch.quantile(flat, pmin / 100.0)
-    hi = torch.quantile(flat, pmax / 100.0)
-    return (raw - lo) / (hi - lo + 1e-8)
-
-
-def _make_transform(pmin: float, pmax: float, augment: bool, gaussian_noise_std: float):
-    """Returns a (raw, mask) -> (raw, mask) callable."""
-
-    def transform(raw, mask):
-        raw = _percentile_normalize(raw, pmin, pmax)
-        if augment:
-            # Per-axis flip, joint to raw + mask.
-            for axis in range(raw.dim()):
-                if torch.rand(1).item() < 0.5:
-                    raw = torch.flip(raw, dims=[axis])
-                    mask = torch.flip(mask, dims=[axis])
-            # YX-plane 90° rotation (k random in 0..3).
-            if raw.dim() >= 2 and torch.rand(1).item() < 0.5:
-                k = int(torch.randint(0, 4, (1,)).item())
-                if k > 0:
-                    raw = torch.rot90(raw, k=k, dims=[-2, -1])
-                    mask = torch.rot90(mask, k=k, dims=[-2, -1])
-            if gaussian_noise_std > 0 and torch.rand(1).item() < 0.3:
-                raw = raw + torch.randn_like(raw) * gaussian_noise_std
-        return raw, mask
-
-    return transform
+def _save_sidecars(log_path: Path, experiment: str, p) -> None:
+    """Persist arch JSON next to the checkpoints so
+    ``UNetSegmenter.from_folder`` can rebuild at inference time."""
+    params = {
+        "model_name": experiment,
+        "conv_dims": p.conv_dims,
+        "in_channels": p.in_channels,
+        "num_classes": p.num_classes,
+        "unet_depth": p.unet_depth,
+        "depth": p.unet_depth,
+        "num_channels_init": p.num_channels_init,
+        "use_batch_norm": p.use_batch_norm,
+        "n_tiles": list(p.n_tiles),
+        "tile_overlap": p.tile_overlap,
+        "learning_rate": p.learning_rate,
+        "batch_size": p.batch_size,
+        "epochs": p.epochs,
+        "optimizer": OmegaConf.select(p, "optimizer", default="adam"),
+        "scheduler": OmegaConf.select(p, "scheduler", default=None),
+    }
+    (log_path / "training_config.json").write_text(
+        json.dumps({"parameters": params}, indent=2)
+    )
+    (log_path / f"{experiment}.json").write_text(json.dumps(params, indent=2))
 
 
 @hydra.main(config_path="conf", config_name="scenario_train_unet", version_base="1.3")
 def main(config: UNetTrainScenario):
     base = config.train_data_paths.base_data_dir
     h5_path = os.path.join(base, config.train_data_paths.h5_file)
-    log_path = config.train_data_paths.log_path
+    log_path = Path(config.train_data_paths.log_path)
     experiment = config.train_data_paths.experiment_name
-    Path(log_path).mkdir(parents=True, exist_ok=True)
+    log_path.mkdir(parents=True, exist_ok=True)
 
     p = config.parameters
-    train_tf = _make_transform(p.pmin, p.pmax, p.augment, p.gaussian_noise_std)
-    val_tf = _make_transform(p.pmin, p.pmax, augment=False, gaussian_noise_std=0.0)
 
-    train_ds = H5UNetDataset(h5_path, split="train", transform=train_tf)
-    val_ds = H5UNetDataset(h5_path, split="val", transform=val_tf)
-    train_loader = DataLoader(
-        train_ds,
-        batch_size=p.batch_size,
-        shuffle=True,
-        num_workers=p.num_workers,
-        collate_fn=unet_collate,
-        persistent_workers=p.num_workers > 0,
+    optimizer_name = OmegaConf.select(p, "optimizer", default="adam")
+    optimizer_kwargs = (
+        OmegaConf.to_container(
+            OmegaConf.select(p, "optimizer_kwargs", default={}), resolve=True
+        )
+        or {}
     )
-    val_loader = DataLoader(
-        val_ds,
-        batch_size=p.batch_size,
-        shuffle=False,
-        num_workers=p.num_workers,
-        collate_fn=unet_collate,
-        persistent_workers=p.num_workers > 0,
+    scheduler_name = OmegaConf.select(p, "scheduler", default=None)
+    scheduler_kwargs = (
+        OmegaConf.to_container(
+            OmegaConf.select(p, "scheduler_kwargs", default={}), resolve=True
+        )
+        or {}
     )
 
-    trainer_obj = UNetTrainer(
-        model_name=experiment,
-        model_dir=log_path,
+    pipe = TrainingPipeline(
+        experiment_name=experiment,
+        log_path=log_path,
         epochs=p.epochs,
-        batch_size=p.batch_size,
         learning_rate=p.learning_rate,
+        accelerator=p.accelerator,
+        devices=p.devices,
+        precision=p.train_precision,
+        strategy=p.strategy,
+    )
+    pipe.setup_unet_transforms(
+        pmin=p.pmin,
+        pmax=p.pmax,
+        augment=p.augment,
+        gaussian_noise_std=p.gaussian_noise_std,
+    )
+    pipe.setup_unet_h5_datasets(
+        h5_file=h5_path,
+        batch_size=p.batch_size,
+        num_workers=p.num_workers,
+    )
+    pipe.setup_unet_model(
         conv_dims=p.conv_dims,
         in_channels=p.in_channels,
         num_classes=p.num_classes,
         unet_depth=p.unet_depth,
         num_channels_init=p.num_channels_init,
         use_batch_norm=p.use_batch_norm,
+    )
+    pipe.setup_optimizer(optimizer_name, **optimizer_kwargs)
+    pipe.setup_scheduler(scheduler_name, **scheduler_kwargs)
+    pipe.setup_care_module(
         n_tiles=list(p.n_tiles),
         tile_overlap=p.tile_overlap,
-        accelerator=p.accelerator,
-        devices=p.devices,
-        precision=p.train_precision,
-        strategy=p.strategy,
     )
-    trainer_obj.fit(train_dataloader=train_loader, val_dataloader=val_loader)
+    pipe.setup_checkpointing()
+    pipe.setup_csv_logger()
+
+    _save_sidecars(log_path, experiment, p)
+    pipe.train()
     print(f"Done. Checkpoints in {log_path}/")
 
 

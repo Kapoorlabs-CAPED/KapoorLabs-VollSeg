@@ -1,22 +1,23 @@
-"""Training harnesses — PyTorch first-class, keras optional.
+"""Training harnesses.
 
-Bare names are always available. ``*Keras`` trainers require the
-optional ``[keras]`` extra.
+The unified :class:`~kapoorlabs_vollseg.training.TrainingPipeline` is
+the supported entry point for CARE / U-Net / StarDist / MaskUNet
+training — call its stackable ``setup_*`` methods directly. The old
+per-task trainer façades (``CARETrainer`` / ``UNetTrainer`` /
+``MaskUNetTrainer`` / ``StarDistTrainer``) have been removed.
+
+What stays here:
+
+* :class:`CellPoseTrainer` — CellPose has its own end-to-end training
+  loop that doesn't fit the Lightning ``configure_optimizers`` shape
+  the pipeline assumes.
+* The legacy ``*Keras`` trainers (csbdeep stack) for already-trained
+  ``.h5`` weights.
 """
 
-from .care import CARETrainer
 from .cellpose import CellPoseTrainer
-from .maskunet import MaskUNetTrainer
-from .stardist import StarDistTrainer
-from .unet import UNetTrainer
 
-__all__ = [
-    "CARETrainer",
-    "UNetTrainer",
-    "MaskUNetTrainer",
-    "StarDistTrainer",
-    "CellPoseTrainer",
-]
+__all__ = ["CellPoseTrainer"]
 
 HAS_KERAS = False
 try:

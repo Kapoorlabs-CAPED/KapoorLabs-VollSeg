@@ -80,13 +80,8 @@ from .pretrained import (
     register_model,
 )
 from .seedpool import SeedPool, UnetStarMask
-from .train import (
-    CARETrainer,
-    CellPoseTrainer,
-    MaskUNetTrainer,
-    StarDistTrainer,
-    UNetTrainer,
-)
+from .train import CellPoseTrainer
+from .training import TrainingPipeline
 
 __all__ = [
     # Layer 1 — PyTorch first-class
@@ -95,11 +90,10 @@ __all__ = [
     "MaskUNetSegmenter",
     "StarDistSegmenter",
     "CellPoseSegmenter",
-    # Trainers — PyTorch first-class
-    "CARETrainer",
-    "UNetTrainer",
-    "MaskUNetTrainer",
-    "StarDistTrainer",
+    # Unified training pipeline
+    "TrainingPipeline",
+    # Trainer — CellPose has its own end-to-end loop that doesn't fit
+    # the Lightning ``configure_optimizers`` shape the pipeline uses.
     "CellPoseTrainer",
     # Layer 2
     "UNetStarDistPipeline",

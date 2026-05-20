@@ -122,7 +122,11 @@ def main(config: CareTrainClass):
         num_channels_init=num_channels_init,
         use_batch_norm=use_batch_norm,
     )
-    trainer.setup_adam()
+    # Optimizer choice is yaml-driven (default "adam" preserves the old
+    # behaviour). For sweeps, set parameters.optimizer="sgd" /
+    # "lars" / "adamw" via Hydra CLI override.
+    optimizer_name = config.parameters.get("optimizer", "adam")
+    trainer.setup_optimizer(optimizer_name)
     trainer.setup_learning_rate_scheduler()
     trainer.setup_care_lightning_model()
     trainer.train(logger=logger, callbacks=callbacks)

@@ -16,6 +16,18 @@ accelerator: "auto"
 train_precision: "32-true"
 strategy: "auto"
 
+# Optimizer — registry-keyed (adam | adamw | adamw_clip | sgd | rmsprop | rprop | lars).
+optimizer: "adam"
+optimizer_kwargs: {}
+
+# Scheduler — registry-keyed (cosine | warm_cosine | cosine_restart |
+# multistep | plateau | linear | constant | exponential | same | none).
+# null → no scheduler. For cosine annealing, t_max should match ``epochs``.
+scheduler: "cosine"
+scheduler_kwargs:
+  t_max: 200
+  eta_min: 1.0e-6
+
 slurm_auto_requeue: true
 
 # Augmentation
