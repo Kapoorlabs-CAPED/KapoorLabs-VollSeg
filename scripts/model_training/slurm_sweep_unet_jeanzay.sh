@@ -74,6 +74,7 @@ echo "────────────────────────�
 srun --unbuffered python lightning-unet.py \
     train_data_paths=xenopus_jeanzay \
     train_data_paths.experiment_name="$EXPERIMENT" \
+    train_data_paths.log_path="/lustre/fsn1/projects/rech/jsy/uzj81mi/models_unet_pytorch_sweep/$EXPERIMENT/" \
     parameters.optimizer="$OPTIMIZER" \
     parameters.learning_rate="$LR" \
     parameters.scheduler="$SCHEDULER" \

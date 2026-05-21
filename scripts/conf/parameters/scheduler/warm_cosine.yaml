@@ -1,0 +1,8 @@
+# Warm-cosine schedule: linear warmup for ``t_warmup`` epochs, then
+# CosineAnnealingLR down to ``eta_min`` over the remaining horizon.
+# Same class used by the CARE checkpoint trained in kapoorlabs-lightning.
+_target_: kapoorlabs_vollseg.care_lightning.schedulers.WarmCosineAnnealingLR
+t_max: ${parameters.epochs}
+t_warmup: 5
+factor: 0.01
+eta_min: 1.0e-8

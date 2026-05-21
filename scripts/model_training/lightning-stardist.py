@@ -135,11 +135,9 @@ def main(config: StarDistTrainScenario):
         tile_overlap=p.tile_overlap,
         loss_lam=p.loss_lam,
     )
-    pipe.setup_checkpointing()
-    pipe.setup_csv_logger()
 
     _save_sidecars(rays, log_path, experiment, p)
-    pipe.train()
+    pipe.train()  # logger + callbacks built inside train() by default
     print(f"Done. Model + rays sidecar in {log_path}/")
 
 

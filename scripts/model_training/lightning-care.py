@@ -36,7 +36,6 @@ def main(config: CareTrainClass):
     gradient_clip_val = config.parameters.gradient_clip_val
     gradient_clip_algorithm = config.parameters.gradient_clip_algorithm
     slurm_auto_requeue = config.parameters.slurm_auto_requeue
-    alpha = config.parameters.alpha
     weight_decay = config.parameters.weight_decay
 
     pmin = config.parameters.pmin
@@ -48,9 +47,13 @@ def main(config: CareTrainClass):
 
     n_tiles = config.parameters.n_tiles
     tile_overlap = config.parameters.tile_overlap
-    scheduler = hydra.utils.instantiate(
-        config.parameters.scheduler, t_max=epochs, t_warmup=5, factor=alpha
-    )
+
+    # Scheduler is fully self-described in its own
+    # ``parameters/scheduler/<name>.yaml`` (Hydra config group).
+    # Override via the CLI as ``parameters/scheduler=cosine`` etc. —
+    # the kwargs each scheduler needs live in its own yaml, no
+    # script-side hardcoding. Same shape as ``lightning-kietzmannlab``.
+    scheduler = hydra.utils.instantiate(config.parameters.scheduler)
 
     # Data paths
     base_data_dir = config.train_data_paths.base_data_dir

@@ -1,3 +1,15 @@
+# Each LR-schedule choice lives in its own ``parameters/scheduler/<name>.yaml``
+# (Hydra config group). Override via the CLI as e.g.
+# ``parameters/scheduler=cosine`` or ``parameters/scheduler=none`` — the
+# kwargs each scheduler's __init__ needs are inside its own yaml, no
+# script-side hardcoding. Same pattern as ``lightning-kietzmannlab``.
+#
+# Optimizer choice is registry-keyed via ``parameters.optimizer`` (read
+# directly by ``lightning-care.py``) — see CareInception.setup_optimizer.
+defaults:
+  - _self_
+  - scheduler: warm_cosine
+
 # UNet architecture (from careamics)
 unet_depth: 3
 num_channels_init: 64
@@ -20,7 +32,10 @@ strategy: 'auto'
 gradient_clip_val: null
 gradient_clip_algorithm: null
 slurm_auto_requeue: True
-alpha: 0.01
+
+# Optimizer (registry-keyed — adam | adamw | sgd | lars | rmsprop)
+optimizer: adam
+weight_decay: 0.0
 
 # Transform parameters
 transform_preset: 'medium'
@@ -31,16 +46,7 @@ gaussian_noise_std: 0.01
 spatial_flip_p: 0.5
 rotation_p: 0.5
 
-# Optimizer
-weight_decay: 0.0
-eta_min: 1.0E-8
-t_warmup: 5
-
 # Prediction parameters
 n_tiles: [1, 4, 4]
 tile_overlap: 0.125
 file_type: '*.tif'
-
-# Scheduler
-scheduler:
-  _target_: kapoorlabs_vollseg.care_lightning.schedulers.WarmCosineAnnealingLR

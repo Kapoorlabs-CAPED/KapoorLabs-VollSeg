@@ -114,11 +114,9 @@ def main(config: UNetTrainScenario):
         n_tiles=list(p.n_tiles),
         tile_overlap=p.tile_overlap,
     )
-    pipe.setup_checkpointing()
-    pipe.setup_csv_logger()
 
     _save_sidecars(log_path, experiment, p)
-    pipe.train()
+    pipe.train()  # logger + callbacks built inside train() by default
     print(f"Done. Checkpoints in {log_path}/")
 
 

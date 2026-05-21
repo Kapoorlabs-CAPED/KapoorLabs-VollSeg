@@ -33,7 +33,6 @@ def main(config: RoiTrainClass):
     gradient_clip_val = config.parameters.gradient_clip_val
     gradient_clip_algorithm = config.parameters.gradient_clip_algorithm
     slurm_auto_requeue = config.parameters.slurm_auto_requeue
-    alpha = config.parameters.alpha
     weight_decay = config.parameters.weight_decay
     conv_dims = config.parameters.conv_dims
     pmin = config.parameters.pmin
@@ -45,9 +44,13 @@ def main(config: RoiTrainClass):
 
     n_tiles = config.parameters.n_tiles
     tile_overlap = config.parameters.tile_overlap
-    scheduler = hydra.utils.instantiate(
-        config.parameters.scheduler, t_max=epochs, t_warmup=5, factor=alpha
-    )
+
+    # Scheduler is fully self-described in its own
+    # ``parameters/scheduler/<name>.yaml`` (Hydra config group).
+    # Override via the CLI as ``parameters/scheduler=cosine`` etc. —
+    # the kwargs each scheduler needs live in its own yaml, no
+    # script-side hardcoding. Same shape as ``lightning-kietzmannlab``.
+    scheduler = hydra.utils.instantiate(config.parameters.scheduler)
 
     base_data_dir = config.train_data_paths.base_data_dir
     h5_file = os.path.join(base_data_dir, config.train_data_paths.roi_h5_file)
@@ -120,7 +123,11 @@ def main(config: RoiTrainClass):
         use_batch_norm=use_batch_norm,
         conv_dims=conv_dims,
     )
-    trainer.setup_adam()
+    # Optimizer choice is yaml-driven; default "adam" preserves the
+    # historical behaviour. For sweeps, set
+    # ``parameters.optimizer=sgd|lars|adamw|...`` via Hydra CLI.
+    optimizer_name = config.parameters.get("optimizer", "adam")
+    trainer.setup_optimizer(optimizer_name)
     trainer.setup_learning_rate_scheduler()
     trainer.setup_care_lightning_model()
     trainer.train(logger=logger, callbacks=callbacks)

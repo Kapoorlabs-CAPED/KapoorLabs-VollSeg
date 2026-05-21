@@ -545,49 +545,6 @@ class TrainingPipeline:
         )
         return self
 
-    # ─────────────────────────────────────────── callbacks / logger
-
-    def setup_checkpointing(
-        self,
-        *,
-        save_top_k: int = -1,
-        every_n_epochs: int = 1,
-        save_last: bool = True,
-    ) -> TrainingPipeline:
-        """Add a flat :class:`ModelCheckpoint` that writes directly into
-        ``log_path/`` (no ``lightning_logs/version_X/checkpoints/``
-        nesting)."""
-        self.state.callbacks.append(
-            ModelCheckpoint(
-                dirpath=os.fspath(self.log_path),
-                filename=f"{self.experiment_name}-{{epoch:03d}}",
-                save_last=save_last,
-                save_top_k=save_top_k,
-                every_n_epochs=every_n_epochs,
-            )
-        )
-        return self
-
-    def setup_csv_logger(self) -> TrainingPipeline:
-        """Flat :class:`CSVLogger` writing ``log_path/metrics.csv`` (no
-        version subfolder). Wipes stale rows so the column schema can
-        change between runs without crashing Lightning's header
-        rewriter."""
-        for stale in ("metrics.csv", "hparams.yaml"):
-            p = self.log_path / stale
-            if p.exists():
-                p.unlink()
-        self.state.logger = CSVLogger(
-            save_dir=os.fspath(self.log_path),
-            name="",
-            version="",
-        )
-        return self
-
-    def add_callback(self, callback: Callback) -> TrainingPipeline:
-        self.state.callbacks.append(callback)
-        return self
-
     # ─────────────────────────────────────────────────────── train
 
     def save_hparams(self, extra: Optional[dict] = None) -> None:
@@ -603,10 +560,56 @@ class TrainingPipeline:
         )
         (self.log_path / "training_config.json").write_text(json.dumps(blob, indent=2))
 
-    def train(self) -> Trainer:
-        """Run ``Trainer.fit``. Returns the :class:`lightning.Trainer`
-        instance so the caller can read ``trainer.checkpoint_callback``
-        / ``trainer.callback_metrics`` afterwards.
+    def _default_callbacks(self) -> list[Callback]:
+        """Flat :class:`ModelCheckpoint` that writes directly into
+        ``log_path/`` (no ``lightning_logs/version_X/checkpoints/``
+        nesting). Used when the caller passes ``callbacks=None``."""
+        return [
+            ModelCheckpoint(
+                dirpath=os.fspath(self.log_path),
+                filename=f"{self.experiment_name}-{{epoch:03d}}",
+                save_last=True,
+                save_top_k=-1,
+                every_n_epochs=1,
+            )
+        ]
+
+    def _default_logger(self) -> CSVLogger:
+        """Flat :class:`CSVLogger` writing ``log_path/metrics.csv`` (no
+        version subfolder). Wipes stale rows so the column schema can
+        change between runs without crashing Lightning's header
+        rewriter. Used when the caller passes ``logger=None``."""
+        for stale in ("metrics.csv", "hparams.yaml"):
+            p = self.log_path / stale
+            if p.exists():
+                p.unlink()
+        return CSVLogger(save_dir=os.fspath(self.log_path), name="", version="")
+
+    def train(
+        self,
+        logger: Any = None,
+        callbacks: Optional[list[Callback]] = None,
+    ) -> Trainer:
+        """Run ``Trainer.fit``. Logger + callbacks live here, not on
+        separate ``setup_*`` methods — same shape as
+        ``CareInception.train(logger=[…], callbacks=[…])``.
+
+        Parameters
+        ----------
+        logger
+            A Lightning logger (or list of them). ``None`` → a flat
+            CSV logger writing ``log_path/metrics.csv`` is built and
+            attached automatically.
+        callbacks
+            List of Lightning :class:`Callback`. ``None`` → a flat
+            :class:`ModelCheckpoint` writing every epoch directly into
+            ``log_path/`` is built and attached automatically.
+
+        Returns
+        -------
+        lightning.Trainer
+            The finished trainer instance, so the caller can read
+            ``trainer.checkpoint_callback`` / ``trainer.callback_metrics``.
 
         Raises
         ------
@@ -620,15 +623,14 @@ class TrainingPipeline:
             )
         if self.state.datamodule is None and self.state.train_dataloader is None:
             raise RuntimeError(
-                "Pipeline has no data — call set_dataloaders or set_datamodule "
-                "before train()."
+                "Pipeline has no data — call setup_<task>_h5_datasets, "
+                "set_dataloaders, or set_datamodule before train()."
             )
 
-        # Default callbacks/logger if the user didn't add them.
-        if not any(isinstance(cb, ModelCheckpoint) for cb in self.state.callbacks):
-            self.setup_checkpointing()
-        if self.state.logger is None:
-            self.setup_csv_logger()
+        if callbacks is None:
+            callbacks = self._default_callbacks()
+        if logger is None:
+            logger = self._default_logger()
 
         trainer = Trainer(
             max_epochs=self.state.epochs,
@@ -638,8 +640,8 @@ class TrainingPipeline:
             strategy=self.state.strategy,
             gradient_clip_val=self.state.gradient_clip_val,
             default_root_dir=os.fspath(self.log_path),
-            callbacks=list(self.state.callbacks),
-            logger=self.state.logger,
+            callbacks=callbacks,
+            logger=logger,
         )
 
         if self.state.datamodule is not None:

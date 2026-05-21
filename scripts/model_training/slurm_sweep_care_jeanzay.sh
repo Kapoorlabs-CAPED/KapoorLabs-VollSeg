@@ -63,29 +63,23 @@ esac
 LR_TAG=$(echo "$LR" | sed 's/[.+]/p/g')
 EXPERIMENT="care_sweep_${OPTIMIZER}_lr${LR_TAG}_${SCHEDULER}"
 
-# CARE uses the kietzmann-style ``_target_`` hydra-instantiate pattern
-# for its scheduler. Map the sweep's string-keyed choice onto the right
-# class path so the existing lightning-care.py script picks it up
-# unchanged.
-case "$SCHEDULER" in
-  none|noscheduler)
-    SCHED_TARGET="kapoorlabs_vollseg.care_lightning.schedulers.SameLR"
-    ;;
-  cosine)
-    SCHED_TARGET="kapoorlabs_vollseg.care_lightning.schedulers.CosineAnnealingScheduler"
-    ;;
-esac
-
+# Scheduler choice is a Hydra config-group override — selects which
+# yaml under ``parameters/scheduler/`` is composed in. Each yaml in
+# that group carries the kwargs its target class needs (warm_cosine
+# has t_max/t_warmup/factor/eta_min, plain cosine has t_max/eta_min,
+# none has just _target_). No script-side kwarg forwarding — same
+# shape as lightning-kietzmannlab's group-driven configs.
 echo "─────────────────────────────────────────────────"
 echo "  optimizer = $OPTIMIZER"
 echo "  lr        = $LR"
-echo "  scheduler = $SCHEDULER ($SCHED_TARGET)"
+echo "  scheduler = $SCHEDULER (parameters/scheduler=$SCHEDULER)"
 echo "  experiment_name = $EXPERIMENT"
 echo "─────────────────────────────────────────────────"
 
 srun --unbuffered python lightning-care.py \
     train_data_paths=care_jeanzay \
     train_data_paths.experiment_name="$EXPERIMENT" \
+    train_data_paths.log_path="/lustre/fsn1/projects/rech/jsy/uzj81mi/models_care_pytorch_sweep/$EXPERIMENT/" \
     parameters.optimizer="$OPTIMIZER" \
     parameters.learning_rate="$LR" \
-    "parameters.scheduler._target_=$SCHED_TARGET"
+    parameters/scheduler="$SCHEDULER"

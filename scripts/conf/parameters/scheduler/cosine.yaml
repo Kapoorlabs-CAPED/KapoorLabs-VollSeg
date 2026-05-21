@@ -1,0 +1,6 @@
+# Plain cosine annealing — no warmup. Use this when training from a
+# warm initialisation (e.g. fine-tuning) where the warmup ramp is
+# already done.
+_target_: kapoorlabs_vollseg.care_lightning.schedulers.CosineAnnealingScheduler
+t_max: ${parameters.epochs}
+eta_min: 1.0e-6

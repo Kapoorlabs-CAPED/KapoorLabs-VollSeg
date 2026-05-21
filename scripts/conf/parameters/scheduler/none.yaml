@@ -1,0 +1,4 @@
+# No-op schedule — LR stays at ``parameters.learning_rate`` for the
+# whole run. ``SameLR.forward`` returns a ``NoScheduler`` that simply
+# never adjusts the param-group LR.
+_target_: kapoorlabs_vollseg.care_lightning.schedulers.SameLR

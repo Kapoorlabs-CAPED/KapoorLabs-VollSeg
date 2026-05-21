@@ -88,6 +88,7 @@ echo "────────────────────────�
 srun --unbuffered python lightning-stardist.py \
     train_data_paths=xenopus_jeanzay \
     train_data_paths.experiment_name="$EXPERIMENT" \
+    train_data_paths.log_path="/lustre/fsn1/projects/rech/jsy/uzj81mi/models_stardist_pytorch_sweep/$EXPERIMENT/" \
     parameters.optimizer="$OPTIMIZER" \
     parameters.learning_rate="$LR" \
     parameters.scheduler="$SCHEDULER" \
