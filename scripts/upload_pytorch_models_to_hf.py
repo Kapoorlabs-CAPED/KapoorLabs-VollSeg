@@ -11,8 +11,21 @@ Usage::
 
     # 1. Put the HF token in a .env file next to this script:
     #    HF_TOKEN=hf_xxx...
-    # 2. python scripts/upload_pytorch_models_to_hf.py \\
-    #        --source-root /home/debian/jean-zay [--dry-run]
+
+    # Standard layout — folders named after the MODELS keys live
+    # directly under --source-root:
+    python scripts/upload_pytorch_models_to_hf.py \\
+        --source-root /home/debian/jean-zay [--dry-run]
+
+    # Replace an existing HF model with the best of a sweep — point
+    # --source-folder at the winning sweep directory and --only at
+    # the repo you want to overwrite. Use --replace to first wipe the
+    # remote repo so stale per-epoch checkpoints from the previous
+    # upload don't linger:
+    python scripts/upload_pytorch_models_to_hf.py \\
+        --source-folder /home/debian/jean-zay/models_unet_pytorch_sweep/unet_sweep_adam_lr1p0e-3_noscheduler \\
+        --only models_unet_pytorch \\
+        --replace
 
 Mapping is held in :data:`MODELS` — extend it when you train more.
 """
@@ -87,24 +100,31 @@ def upload_one(
     source_root: Path,
     *,
     dry_run: bool,
+    source_override: Path | None = None,
+    replace: bool = False,
 ) -> bool:
     if folder_name not in MODELS:
         print(f"  skip: {folder_name} not in MODELS")
         return False
 
     repo_id = MODELS[folder_name]
-    src = source_root / folder_name
+    src = source_override if source_override is not None else source_root / folder_name
     if not src.is_dir():
         print(f"  skip: {folder_name} — source {src} not found")
         return False
 
-    print(f"  → {repo_id}  (from {src})")
+    label = f"REPLACE from {src}" if replace else f"upload from {src}"
+    print(f"  → {repo_id}  ({label})")
     if dry_run:
         return True
 
     api.create_repo(repo_id=repo_id, repo_type="model", exist_ok=True, private=False)
     readme_text = _readme_for(folder_name, repo_id)
-    commit = f"Initial upload of {folder_name}"
+    commit = (
+        f"Replace contents with {src.name}"
+        if replace
+        else f"Initial upload of {folder_name}"
+    )
 
     readme = src / "README.md"
     if not readme.exists():
@@ -118,12 +138,21 @@ def upload_one(
             commit_message="Update model card",
         )
 
-    api.upload_folder(
-        repo_id=repo_id,
-        folder_path=str(src),
-        repo_type="model",
-        commit_message=commit,
-    )
+    # ``delete_patterns=["*"]`` wipes every file in the repo as part of
+    # the same commit, then uploads the local folder fresh — guarantees
+    # no stale per-epoch checkpoints from a prior upload linger on the
+    # remote. README is preserved because we upload it (above) in the
+    # same commit batch.
+    upload_kwargs = {
+        "repo_id": repo_id,
+        "folder_path": str(src),
+        "repo_type": "model",
+        "commit_message": commit,
+    }
+    if replace:
+        upload_kwargs["delete_patterns"] = ["*"]
+
+    api.upload_folder(**upload_kwargs)
     return True
 
 
@@ -131,9 +160,26 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--source-root",
-        required=True,
         type=Path,
-        help="Path containing the model folders, e.g. /home/debian/jean-zay",
+        default=None,
+        help="Path containing the model folders, e.g. /home/debian/jean-zay. "
+        "Either this or --source-folder must be provided.",
+    )
+    parser.add_argument(
+        "--source-folder",
+        type=Path,
+        default=None,
+        help="Explicit source folder to upload (overrides "
+        "``source_root / folder_name`` lookup). Useful for pushing the "
+        "winning run of a sweep without renaming it on disk. Requires "
+        "exactly one ``--only`` target.",
+    )
+    parser.add_argument(
+        "--replace",
+        action="store_true",
+        help="Wipe every file in the remote repo before uploading the "
+        "new folder (single commit). Pair with --source-folder to "
+        "swap in the winner of a sweep cleanly.",
     )
     parser.add_argument(
         "--dry-run",
@@ -155,7 +201,30 @@ def main():
     )
     args = parser.parse_args()
 
-    if not args.source_root.exists():
+    # Need at least one of source-root / source-folder, and source-folder
+    # is per-target (a single directory maps to a single repo), so it
+    # demands exactly one --only target to avoid silently mis-mapping.
+    if args.source_root is None and args.source_folder is None:
+        print(
+            "Either --source-root or --source-folder must be provided.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    if args.source_folder is not None:
+        if not args.source_folder.is_dir():
+            print(
+                f"--source-folder {args.source_folder} does not exist",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        if not args.only or len(args.only) != 1:
+            print(
+                "--source-folder requires exactly one --only target "
+                "so the mapping to a single HF repo is unambiguous.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+    if args.source_root is not None and not args.source_root.exists():
         print(f"--source-root {args.source_root} does not exist", file=sys.stderr)
         sys.exit(1)
 
@@ -179,7 +248,14 @@ def main():
     ok = 0
     for name in targets:
         print(f"\n[{name}]")
-        if upload_one(api, name, args.source_root, dry_run=args.dry_run):
+        if upload_one(
+            api,
+            name,
+            args.source_root,
+            dry_run=args.dry_run,
+            source_override=args.source_folder,
+            replace=args.replace,
+        ):
             ok += 1
     print(f"\nDone: {ok}/{len(targets)} succeeded")
 
