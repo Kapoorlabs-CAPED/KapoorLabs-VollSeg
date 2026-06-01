@@ -234,6 +234,15 @@ def nms_to_labels(
     if centers.size == 0:
         return np.zeros(vol_shape, dtype=np.uint16)
 
+    # Surface the peak count before the (potentially O(N^2)) NMS so a
+    # pathological model (e.g. noisy prob map → tens of thousands of
+    # candidates) is visible up front instead of being a silent wait.
+    print(
+        f"  nms_to_labels: {len(centers)} peaks above prob_thresh="
+        f"{prob_thresh} (min_distance={min_distance})",
+        flush=True,
+    )
+
     scores = prob_map[tuple(centers.T)]
     dists = np.stack(
         [dist_map[(slice(None),) + tuple(c)] for c in centers], axis=0
@@ -486,25 +495,134 @@ def _bbox_iou(bbox_a, mask_a, bbox_b, mask_b) -> float:
     return float(inter) / float(union)
 
 
+def _bbox_nms_gpu(
+    centers: np.ndarray,
+    dists: np.ndarray,
+    scores: np.ndarray,
+    rays: np.ndarray,
+    vol_shape: tuple,
+    iou_thresh: float,
+    device: Optional[str] = None,
+) -> np.ndarray:
+    """Greedy 3D axis-aligned bounding-box NMS on the GPU.
+
+    Each peak's bbox is derived analytically from its predicted ray
+    distances (``rays * dists``) — the smallest axis-aligned box that
+    contains the star-polyhedron. All the per-pair IoU arithmetic is
+    vectorised against the full set of still-alive boxes at once, so
+    the loop becomes O(N) vectorised GPU operations instead of the
+    O(N²) Python rasterise-and-overlap that ``_nms_polyhedra`` runs.
+
+    Returns the indices of kept peaks in *score-descending* order.
+    """
+    device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+    centers_t = torch.as_tensor(centers, dtype=torch.float32, device=device)
+    dists_t = torch.as_tensor(dists, dtype=torch.float32, device=device)
+    rays_t = torch.as_tensor(rays, dtype=torch.float32, device=device)
+    scores_t = torch.as_tensor(scores, dtype=torch.float32, device=device)
+
+    # Scaled ray endpoints per peak. shape (N, R, D)
+    scaled = dists_t[:, :, None] * rays_t[None, :, :]
+    # Per-peak axis-aligned bbox in voxel coords.
+    lo = centers_t[:, None, :] + scaled.min(dim=1, keepdim=False).values[:, None, :]
+    hi = centers_t[:, None, :] + scaled.max(dim=1, keepdim=False).values[:, None, :]
+    lo = lo.squeeze(1).clamp_(min=0.0)
+    hi = hi.squeeze(1)
+    for d, L in enumerate(vol_shape):
+        hi[:, d].clamp_(max=float(L))
+
+    vol = (hi - lo).clamp_(min=0.0).prod(dim=1)  # (N,)
+
+    # Process in descending-score order. ``keep_mask`` tracks whether a
+    # peak has been suppressed by an earlier kept one.
+    order = torch.argsort(scores_t, descending=True)
+    keep_mask = torch.ones(len(order), dtype=torch.bool, device=device)
+
+    pbar = tqdm(
+        range(len(order)),
+        total=len(order),
+        desc=f"  nms_gpu[N={len(order)}]",
+        unit="peak",
+        leave=False,
+        dynamic_ncols=True,
+        mininterval=0.5,
+    )
+    kept_count = 0
+    for pos in pbar:
+        if not bool(keep_mask[pos]):
+            continue
+        i = order[pos]
+        # IoU between peak i and every later peak still alive.
+        later = order[pos + 1 :]
+        if len(later) == 0:
+            kept_count += 1
+            continue
+        active_mask = keep_mask[pos + 1 :]
+        if not bool(active_mask.any()):
+            kept_count += 1
+            continue
+        active_later = later[active_mask]
+        inter_lo = torch.maximum(lo[i].unsqueeze(0), lo[active_later])
+        inter_hi = torch.minimum(hi[i].unsqueeze(0), hi[active_later])
+        inter = (inter_hi - inter_lo).clamp_(min=0.0).prod(dim=1)
+        union = vol[i] + vol[active_later] - inter
+        iou = inter / union.clamp_(min=1e-9)
+        # Indices of active_later that get suppressed.
+        sup_local = iou >= iou_thresh
+        if bool(sup_local.any()):
+            # Translate back into the keep_mask slice [pos+1:] coordinate
+            # frame. ``active_idx_in_slice`` is the position within the
+            # [pos+1:] view; suppress those slots.
+            active_idx_in_slice = torch.nonzero(active_mask, as_tuple=False).squeeze(1)
+            kill = active_idx_in_slice[sup_local]
+            keep_mask[pos + 1 + kill] = False
+        kept_count += 1
+        if kept_count and (kept_count % 500 == 0):
+            pbar.set_postfix_str(f"kept={kept_count}")
+
+    kept_pos = torch.nonzero(keep_mask, as_tuple=False).squeeze(1)
+    return order[kept_pos].cpu().numpy()
+
+
 def _nms_polyhedra(*, centers, dists, scores, rays, vol_shape, iou_thresh, faces=None):
-    """Greedy NMS — sort by descending score, drop those overlapping kept ones."""
-    order = np.argsort(-scores)
+    """Greedy NMS via 3D bbox-IoU on the GPU, then rasterise only the
+    survivors for label-painting.
+
+    Replaces the original Python-side per-peak polyhedron-rasterise
+    inside a quadratic loop, which was the dominant cost of
+    :func:`nms_to_labels` for under-trained or noisy models. Bounding-
+    box IoU is the same approximation the upstream StarDist
+    implementation uses; for tightly packed nuclei you may want to
+    raise ``nms_thresh`` slightly (boxes overlap more than the
+    inscribed polyhedra do) to recover separation.
+    """
+    kept_idx_arr = _bbox_nms_gpu(
+        centers=centers,
+        dists=dists,
+        scores=scores,
+        rays=rays,
+        vol_shape=vol_shape,
+        iou_thresh=iou_thresh,
+    )
     kept_idx, kept_bbox, kept_masks = [], [], []
-    for i in order:
+    raster_iter = tqdm(
+        kept_idx_arr,
+        total=len(kept_idx_arr),
+        desc=f"  rasterise kept[{len(kept_idx_arr)}]",
+        unit="peak",
+        leave=False,
+        dynamic_ncols=True,
+        mininterval=0.5,
+    )
+    for i in raster_iter:
         bbox_i, mask_i = _rasterize_to_bbox(
-            centers[i], rays, dists[i], vol_shape, faces=faces
+            centers[int(i)], rays, dists[int(i)], vol_shape, faces=faces
         )
         if not mask_i.any():
             continue
-        suppress = False
-        for bbox_j, mask_j in zip(kept_bbox, kept_masks):
-            if _bbox_iou(bbox_i, mask_i, bbox_j, mask_j) >= iou_thresh:
-                suppress = True
-                break
-        if not suppress:
-            kept_idx.append(int(i))
-            kept_bbox.append(bbox_i)
-            kept_masks.append(mask_i)
+        kept_idx.append(int(i))
+        kept_bbox.append(bbox_i)
+        kept_masks.append(mask_i)
     return kept_idx, kept_bbox, kept_masks
 
 
