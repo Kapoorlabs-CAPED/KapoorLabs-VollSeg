@@ -29,6 +29,7 @@ import numpy as np
 import torch
 from skimage.feature import peak_local_max
 from torch.utils.data import DataLoader
+from tqdm.auto import tqdm
 
 from .._lightning.dataset import CarePredictionDataset, compute_tile_shape
 from .._lightning.transforms import PercentileNormalize
@@ -287,8 +288,23 @@ def _predict_and_stitch(
     dist_acc = np.zeros((model.n_rays, *image.shape), dtype=np.float32)
     weight = np.zeros(image.shape, dtype=np.float32)
 
+    # Per-frame, the outer Lightning predict bar only ticks once a whole
+    # frame is done — inside that single tick we run len(loader) forward
+    # passes (e.g. 21 for batch_size=4, 81 tiles). Expose a transient
+    # per-tile bar so the caller sees forward progress within a frame
+    # and can spot a hang vs a slow-but-progressing run.
+    tile_iter = tqdm(
+        loader,
+        total=len(loader),
+        desc=f"  tiles[shape={tile_shape},bs={batch_size}]",
+        unit="batch",
+        leave=False,
+        dynamic_ncols=True,
+        mininterval=0.5,
+    )
+
     with torch.no_grad():
-        for tiles, coords in loader:
+        for tiles, coords in tile_iter:
             tiles = tiles.to(device)
             prob, dists, coords_out = model.predict_step((tiles, coords), batch_idx=0)
             prob = prob.numpy()  # (B, 1, *spatial)

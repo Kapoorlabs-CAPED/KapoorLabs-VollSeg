@@ -68,6 +68,10 @@ devices = 1
 accelerator = "auto"
 strategy = "auto"
 n_tiles = (1, 8, 8)
+# Per-tile batch size inside ``predict_volume``. Default of 4 underuses
+# a V100; bump to 16 for ~3× wall-clock gain when VRAM allows. Drop back
+# to 4 if you OOM mid-frame.
+predict_batch_size = 16
 
 # IoU thresholds at which prediction quality is scored.
 iou_threshs = (0.3, 0.5, 0.7)
@@ -227,7 +231,7 @@ for i, model_dir in enumerate(model_dirs):
     pred_dir.mkdir(exist_ok=True)
 
     try:
-        star = StarDistSegmenter.from_folder(model_dir)
+        star = StarDistSegmenter.from_folder(model_dir, batch_size=predict_batch_size)
     except FileNotFoundError as e:
         print(f"   ✗ no checkpoint: {e}")
         continue
