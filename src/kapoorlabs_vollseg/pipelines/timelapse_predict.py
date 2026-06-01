@@ -89,6 +89,7 @@ def predict_timelapse(
     accelerator: str = "auto",
     strategy: str = "auto",
     enable_progress_bar: bool = True,
+    num_workers=0,
     **predict_kwargs,
 ) -> dict[str, Optional[np.ndarray]]:
     """Run ``pipeline.predict(...)`` over every timepoint of ``volume``.
@@ -125,7 +126,7 @@ def predict_timelapse(
         batch_size=1,
         shuffle=False,
         collate_fn=_identity_collate,
-        num_workers=0,
+        num_workers=num_workers,
     )
     trainer = Trainer(
         accelerator=accelerator,

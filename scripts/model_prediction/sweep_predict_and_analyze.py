@@ -51,7 +51,7 @@ keras_dir = Path("/lustre/fsn1/projects/rech/jsy/uzj81mi/demo_data/keras_predict
 devices = 1
 accelerator = "auto"
 strategy = "auto"
-n_tiles = (1, 4, 4)
+n_tiles = (1, 8, 8)
 
 # IoU thresholds at which prediction quality is scored.
 iou_threshs = (0.3, 0.5, 0.7)
