@@ -26,17 +26,36 @@ import csv
 import functools
 import gc
 import json
+import os
 import time
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import torch
+import torch.distributed as dist
 from tifffile import TiffFile, imread, imwrite
 
 from kapoorlabs_vollseg import StarDistSegmenter, predict_timelapse
 from kapoorlabs_vollseg._backbones._config import read_thresholds
 from kapoorlabs_vollseg.eval import matching_dataset
+
+
+def _is_rank_zero() -> bool:
+    """Whether we're the rank-0 worker (single-GPU default returns True).
+
+    Under DDP every rank runs this script but only rank 0 has the gathered
+    per-frame results from ``predict_timelapse``; rank > 0 returns ``{}``.
+    So all the analysis / CSV-write / printout work has to be gated on
+    rank 0 to avoid the workers fighting over ``sweep_summary.csv`` or
+    appending bogus all-empty rows."""
+    if dist.is_available() and dist.is_initialized():
+        return dist.get_rank() == 0
+    # Lightning sets ``LOCAL_RANK`` / ``RANK`` before the process group
+    # is initialised; honour those so the early prints (before the first
+    # ``predict_timelapse`` call) are also rank-0-gated.
+    return int(os.environ.get("RANK", os.environ.get("LOCAL_RANK", 0))) == 0
+
 
 # Force every status line to flush immediately so SLURM logs show
 # where the sweep is without waiting for the process to exit. Belt-
@@ -62,11 +81,22 @@ input_pattern = "*.tif"
 # as the inputs (i.e. ``timelapse_fifth_dataset.tif`` here, etc.).
 keras_dir = Path("/lustre/fsn1/projects/rech/jsy/uzj81mi/demo_data/keras_prediction/")
 
-# Multi-GPU sweep prediction knobs — usually fine to leave at single-GPU
-# since the analysis loop is sequential model-by-model.
-devices = 1
+# Multi-GPU sweep prediction knobs. ``predict_timelapse`` shards the
+# T axis across DDP ranks via Lightning's ``DistributedSampler`` — each
+# GPU walks a disjoint subset of timepoints (by frame index) and the
+# gather happens transparently inside ``predict_timelapse`` before the
+# rank-0 worker writes the prediction TIFF. To actually use the GPUs
+# you have to launch the script under ``srun`` so SLURM spawns the
+# right number of tasks; on a single 4×A100 node the recommended
+# launch is::
+#
+#     srun --ntasks-per-node=4 --gres=gpu:4 python sweep_predict_and_analyze.py
+#
+# Setting ``devices=-1`` lets Lightning pick up whatever GPUs SLURM /
+# CUDA_VISIBLE_DEVICES exposed. Set ``strategy="ddp"`` when devices > 1.
+devices = -1  # -1 = all visible GPUs; 1 for single-GPU runs.
 accelerator = "auto"
-strategy = "auto"
+strategy = "ddp"  # "auto" works for single-GPU; explicit DDP for ≥2.
 n_tiles = (1, 8, 8)
 # Per-tile batch size inside ``predict_volume``. Default of 4 underuses
 # a V100; bump to 16 for ~3× wall-clock gain when VRAM allows. Drop back
@@ -259,6 +289,13 @@ for i, model_dir in enumerate(model_dirs):
                 f"shape={tuple(vol.shape)} dtype={vol.dtype}",
             )
             if vol.ndim == 4:
+                # Every DDP rank participates in ``predict_timelapse`` —
+                # Lightning's DistributedSampler hands each rank a
+                # disjoint subset of timepoints (by index) and the
+                # function gathers all per-frame outputs to rank 0
+                # before returning. Non-zero ranks receive ``{}`` so
+                # the post-predict scoring / TIFF-write naturally
+                # short-circuits on them.
                 out = predict_timelapse(
                     star,
                     vol,
@@ -270,7 +307,7 @@ for i, model_dir in enumerate(model_dirs):
                     nms_thresh=nms_thresh,
                     n_tiles=n_tiles,
                 )
-                if not out:  # non-zero DDP rank
+                if not out:  # non-zero DDP rank — skip the rank-0 work
                     continue
                 labels_tzyx = np.stack(
                     [out["labels"][t] for t in range(out["labels"].shape[0])],
@@ -343,52 +380,56 @@ for i, model_dir in enumerate(model_dirs):
     )
 
 
-# %% ─── write summary + rank ────────────────────────────────────────
-if not results:
-    print("No models scored. Check sweep_root / input_dir / keras_dir.")
-else:
-    # Stable column order — tags + training metrics + per-IoU metrics.
-    sorted_keys = list(results[0].keys())
-    for r in results[1:]:
-        for k in r:
-            if k not in sorted_keys:
-                sorted_keys.append(k)
+# %% ─── write summary + rank (rank 0 only) ─────────────────────────
+# Workers (rank > 0) have empty ``per_file_scores`` so their ``results``
+# list is all-empty rows that would clobber the CSV the rank-0 worker
+# is about to write. Gate everything from here on on rank 0 explicitly.
+if _is_rank_zero():
+    if not results:
+        print("No models scored. Check sweep_root / input_dir / keras_dir.")
+    else:
+        # Stable column order — tags + training metrics + per-IoU metrics.
+        sorted_keys = list(results[0].keys())
+        for r in results[1:]:
+            for k in r:
+                if k not in sorted_keys:
+                    sorted_keys.append(k)
 
-    with summary_csv.open("w", newline="") as fh:
-        w = csv.DictWriter(fh, fieldnames=sorted_keys)
-        w.writeheader()
-        for r in results:
-            w.writerow(r)
-    print(f"Summary CSV: {summary_csv}")
-    print()
+        with summary_csv.open("w", newline="") as fh:
+            w = csv.DictWriter(fh, fieldnames=sorted_keys)
+            w.writeheader()
+            for r in results:
+                w.writerow(r)
+        print(f"Summary CSV: {summary_csv}")
+        print()
 
-    key = f"{primary_metric}@iou{primary_iou:.2f}"
-    by_pred = sorted(
-        [r for r in results if r.get(key) is not None],
-        key=lambda r: r[key],
-        reverse=True,
-    )
-    by_train = sorted(
-        [r for r in results if r.get("val_loss_final") is not None],
-        key=lambda r: r["val_loss_final"],
-    )
-
-    print(f"── BEST BY PREDICTION QUALITY (top 5, {key}) ──")
-    for r in by_pred[:5]:
-        print(
-            f"  {r[key]:.4f}  {r['experiment']:<60}  "
-            f"opt={r['optimizer']!s:<6}  lr={r['learning_rate']!s:<10}  "
-            f"sched={r['scheduler']!s:<12}  val_loss_final={r['val_loss_final']!s}"
+        key = f"{primary_metric}@iou{primary_iou:.2f}"
+        by_pred = sorted(
+            [r for r in results if r.get(key) is not None],
+            key=lambda r: r[key],
+            reverse=True,
+        )
+        by_train = sorted(
+            [r for r in results if r.get("val_loss_final") is not None],
+            key=lambda r: r["val_loss_final"],
         )
 
-    print()
-    print("── BEST BY TRAINING (top 5, val_loss_final ↓) ──")
-    for r in by_train[:5]:
-        print(
-            f"  {r['val_loss_final']:.6f}  {r['experiment']:<60}  "
-            f"opt={r['optimizer']!s:<6}  lr={r['learning_rate']!s:<10}  "
-            f"sched={r['scheduler']!s:<12}  {key}={r.get(key)!s}"
-        )
+        print(f"── BEST BY PREDICTION QUALITY (top 5, {key}) ──")
+        for r in by_pred[:5]:
+            print(
+                f"  {r[key]:.4f}  {r['experiment']:<60}  "
+                f"opt={r['optimizer']!s:<6}  lr={r['learning_rate']!s:<10}  "
+                f"sched={r['scheduler']!s:<12}  val_loss_final={r['val_loss_final']!s}"
+            )
+
+        print()
+        print("── BEST BY TRAINING (top 5, val_loss_final ↓) ──")
+        for r in by_train[:5]:
+            print(
+                f"  {r['val_loss_final']:.6f}  {r['experiment']:<60}  "
+                f"opt={r['optimizer']!s:<6}  lr={r['learning_rate']!s:<10}  "
+                f"sched={r['scheduler']!s:<12}  {key}={r.get(key)!s}"
+            )
 
 
 # %%
