@@ -23,16 +23,32 @@ Edit the paths block at the top, then ``python sweep_predict_and_analyze.py``.
 from __future__ import annotations
 
 import csv
+import functools
+import gc
 import json
+import time
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from tifffile import TiffFile, imwrite
+import torch
+from tifffile import TiffFile, imread, imwrite
 
 from kapoorlabs_vollseg import StarDistSegmenter, predict_timelapse
 from kapoorlabs_vollseg._backbones._config import read_thresholds
 from kapoorlabs_vollseg.eval import matching_dataset
+
+# Force every status line to flush immediately so SLURM logs show
+# where the sweep is without waiting for the process to exit. Belt-
+# and-braces alongside ``PYTHONUNBUFFERED=1`` / ``python -u``.
+print = functools.partial(print, flush=True)
+
+
+def _human(t: float) -> str:
+    if t < 60:
+        return f"{t:.1f}s"
+    m, s = divmod(t, 60)
+    return f"{int(m)}m{s:.0f}s"
 
 
 # %% ─── paths (edit per cluster) ─────────────────────────────────────
@@ -164,7 +180,7 @@ def _score_against_keras(pred_path: Path, keras_path: Path) -> dict:
             return {
                 "matching_error": (f"shape mismatch: pred={pred.shape} ref={ref.shape}")
             }
-        stats = matching_dataset(ref, pred, thresh=iou_threshs, show_progress=False)
+        stats = matching_dataset(ref, pred, thresh=iou_threshs, show_progress=True)
     flat = {}
     for thr, m in zip(iou_threshs, stats):
         for k in (
@@ -201,7 +217,12 @@ print()
 results = []
 for i, model_dir in enumerate(model_dirs):
     tags = _parse_sweep_tags(model_dir)
-    print(f"[{i + 1}/{len(model_dirs)}] {tags['experiment']}")
+    t_model = time.perf_counter()
+    print(
+        f"\n[{i + 1}/{len(model_dirs)}] {tags['experiment']}  "
+        f"(opt={tags['optimizer']} lr={tags['learning_rate']} "
+        f"sched={tags['scheduler']})"
+    )
     pred_dir = model_dir / "predictions"
     pred_dir.mkdir(exist_ok=True)
 
@@ -214,15 +235,25 @@ for i, model_dir in enumerate(model_dirs):
     overrides = read_thresholds(model_dir)
     prob_thresh = overrides.get("prob_thresh", 0.5)
     nms_thresh = overrides.get("nms_thresh", 0.3)
+    print(
+        f"   loaded  prob_thresh={prob_thresh}  nms_thresh={nms_thresh}  "
+        f"n_tiles={n_tiles}"
+    )
 
     # ── predict each input ──
     per_file_scores = []
-    for f in input_files:
+    for j, f in enumerate(input_files):
         out_path = pred_dir / f.name
         if not out_path.is_file():
-            from tifffile import imread
-
+            t_pred = time.perf_counter()
+            print(
+                f"   [{j + 1}/{len(input_files)}] reading {f.name}",
+            )
             vol = imread(f)
+            print(
+                f"   [{j + 1}/{len(input_files)}] predicting "
+                f"shape={tuple(vol.shape)} dtype={vol.dtype}",
+            )
             if vol.ndim == 4:
                 out = predict_timelapse(
                     star,
@@ -230,7 +261,7 @@ for i, model_dir in enumerate(model_dirs):
                     devices=devices,
                     accelerator=accelerator,
                     strategy=strategy,
-                    enable_progress_bar=False,
+                    enable_progress_bar=True,
                     prob_thresh=prob_thresh,
                     nms_thresh=nms_thresh,
                     n_tiles=n_tiles,
@@ -250,13 +281,36 @@ for i, model_dir in enumerate(model_dirs):
                     n_tiles=n_tiles,
                 )
                 imwrite(out_path, result.labels.astype(np.uint32))
+            print(
+                f"   [{j + 1}/{len(input_files)}] wrote {out_path.name} "
+                f"in {_human(time.perf_counter() - t_pred)}"
+            )
+        else:
+            print(
+                f"   [{j + 1}/{len(input_files)}] {out_path.name} already "
+                f"exists — skipping predict"
+            )
 
         # ── score against keras ref ──
         keras_path = keras_dir / f.name
         if not keras_path.is_file():
             print(f"   keras ref missing for {f.name} — skipping score")
             continue
+        t_score = time.perf_counter()
+        print(f"   [{j + 1}/{len(input_files)}] scoring vs keras ref…")
         per_file_scores.append(_score_against_keras(out_path, keras_path))
+        print(
+            f"   [{j + 1}/{len(input_files)}] scored in "
+            f"{_human(time.perf_counter() - t_score)}"
+        )
+
+    # Free the StarDist backbone from GPU before loading the next model.
+    # Otherwise 18 model loads in the same process pile up on the V100
+    # and we OOM mid-sweep rather than on tile-1 of model-1.
+    del star
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
 
     # average scores across input files
     avg = {}
@@ -280,9 +334,9 @@ for i, model_dir in enumerate(model_dirs):
     headline = avg.get(f"{primary_metric}@iou{primary_iou:.2f}", float("nan"))
     print(
         f"   {primary_metric}@iou{primary_iou:.2f}: {headline:.4f}  "
-        f"val_loss_final: {row.get('val_loss_final')!s:>8}"
+        f"val_loss_final: {row.get('val_loss_final')!s:>8}  "
+        f"model_total: {_human(time.perf_counter() - t_model)}"
     )
-    print()
 
 
 # %% ─── write summary + rank ────────────────────────────────────────
