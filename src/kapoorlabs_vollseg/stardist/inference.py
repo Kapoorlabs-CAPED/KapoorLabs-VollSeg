@@ -27,6 +27,7 @@ from typing import Optional
 
 import numpy as np
 import torch
+from scipy.spatial import cKDTree
 from skimage.feature import peak_local_max
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
@@ -495,53 +496,71 @@ def _bbox_iou(bbox_a, mask_a, bbox_b, mask_b) -> float:
     return float(inter) / float(union)
 
 
-def _bbox_nms_gpu(
+def _bbox_nms_kdtree(
     centers: np.ndarray,
     dists: np.ndarray,
     scores: np.ndarray,
     rays: np.ndarray,
     vol_shape: tuple,
     iou_thresh: float,
-    device: Optional[str] = None,
 ) -> np.ndarray:
-    """Greedy 3D axis-aligned bounding-box NMS on the GPU.
+    """Greedy axis-aligned bbox NMS with a KDTree spatial pre-filter.
 
-    Each peak's bbox is derived analytically from its predicted ray
-    distances (``rays * dists``) — the smallest axis-aligned box that
-    contains the star-polyhedron. All the per-pair IoU arithmetic is
-    vectorised against the full set of still-alive boxes at once, so
-    the loop becomes O(N) vectorised GPU operations instead of the
-    O(N²) Python rasterise-and-overlap that ``_nms_polyhedra`` runs.
+    Algorithm-equivalent to the C++/OpenMP NMS in the original stardist
+    library, ported to pure numpy + scipy so we don't drag a keras /
+    stardist dependency into this environment. The trick the C++ impl
+    uses (and we copy here) is the KDTree neighbourhood query: for
+    each peak in score order, only candidates within
+    ``radius_i + radius_max`` of its centre can possibly overlap, so
+    we run the (cheap) bbox-IoU check against that small set instead
+    of against all N peaks. Reduces the work from O(N²) to O(N × k)
+    where k is the average number of bounding-sphere neighbours per
+    peak (typically a few dozen in densely packed tissue, even for
+    N=30k).
 
     Returns the indices of kept peaks in *score-descending* order.
     """
-    device = device or ("cuda" if torch.cuda.is_available() else "cpu")
-    centers_t = torch.as_tensor(centers, dtype=torch.float32, device=device)
-    dists_t = torch.as_tensor(dists, dtype=torch.float32, device=device)
-    rays_t = torch.as_tensor(rays, dtype=torch.float32, device=device)
-    scores_t = torch.as_tensor(scores, dtype=torch.float32, device=device)
+    N = len(centers)
+    if N == 0:
+        return np.zeros(0, dtype=np.int64)
 
-    # Scaled ray endpoints per peak. shape (N, R, D)
-    scaled = dists_t[:, :, None] * rays_t[None, :, :]
-    # Per-peak axis-aligned bbox in voxel coords.
-    lo = centers_t[:, None, :] + scaled.min(dim=1, keepdim=False).values[:, None, :]
-    hi = centers_t[:, None, :] + scaled.max(dim=1, keepdim=False).values[:, None, :]
-    lo = lo.squeeze(1).clamp_(min=0.0)
-    hi = hi.squeeze(1)
-    for d, L in enumerate(vol_shape):
-        hi[:, d].clamp_(max=float(L))
+    centers = np.asarray(centers, dtype=np.float32)
+    dists = np.asarray(dists, dtype=np.float32)
+    rays = np.asarray(rays, dtype=np.float32)
+    scores = np.asarray(scores, dtype=np.float32)
 
-    vol = (hi - lo).clamp_(min=0.0).prod(dim=1)  # (N,)
+    # Per-peak axis-aligned bbox and bounding-sphere radius derived
+    # analytically from the predicted ray distances. The bbox is the
+    # smallest box containing the star-polyhedron; the sphere radius
+    # is the longest ray (any other peak whose centre is farther than
+    # ``r_i + r_j`` from peak i can't overlap with peak i, so KDTree
+    # culls the comparison entirely).
+    scaled = dists[:, :, None] * rays[None, :, :]  # (N, R, D)
+    lo = centers + scaled.min(axis=1)
+    hi = centers + scaled.max(axis=1)
+    lo = np.maximum(lo, 0.0)
+    vol_shape_arr = np.asarray(vol_shape, dtype=np.float32)
+    hi = np.minimum(hi, vol_shape_arr)
+    vol = np.clip(hi - lo, 0.0, None).prod(axis=1)  # (N,)
+    radii = dists.max(axis=1)  # (N,)
+    max_radius = float(radii.max())
 
-    # Process in descending-score order. ``keep_mask`` tracks whether a
-    # peak has been suppressed by an earlier kept one.
-    order = torch.argsort(scores_t, descending=True)
-    keep_mask = torch.ones(len(order), dtype=torch.bool, device=device)
+    # Process in descending-score order. ``rank[i]`` is i's position in
+    # ``order``; rank > my_rank means "lower score than me" so those
+    # neighbours are the suppression candidates when I visit my peak.
+    order = np.argsort(-scores, kind="stable")
+    rank = np.empty(N, dtype=np.int64)
+    rank[order] = np.arange(N)
 
+    suppressed = np.zeros(N, dtype=bool)
+    tree = cKDTree(centers)
+    # ``query_radius`` is conservative: r_i + r_max bounds every
+    # possible bounding-sphere overlap. False positives are rejected
+    # by the bbox-IoU check below.
     pbar = tqdm(
-        range(len(order)),
-        total=len(order),
-        desc=f"  nms_gpu[N={len(order)}]",
+        range(N),
+        total=N,
+        desc=f"  nms_kdtree[N={N}]",
         unit="peak",
         leave=False,
         dynamic_ncols=True,
@@ -549,54 +568,55 @@ def _bbox_nms_gpu(
     )
     kept_count = 0
     for pos in pbar:
-        if not bool(keep_mask[pos]):
-            continue
         i = order[pos]
-        # IoU between peak i and every later peak still alive.
-        later = order[pos + 1 :]
-        if len(later) == 0:
-            kept_count += 1
+        if suppressed[i]:
             continue
-        active_mask = keep_mask[pos + 1 :]
-        if not bool(active_mask.any()):
-            kept_count += 1
-            continue
-        active_later = later[active_mask]
-        inter_lo = torch.maximum(lo[i].unsqueeze(0), lo[active_later])
-        inter_hi = torch.minimum(hi[i].unsqueeze(0), hi[active_later])
-        inter = (inter_hi - inter_lo).clamp_(min=0.0).prod(dim=1)
-        union = vol[i] + vol[active_later] - inter
-        iou = inter / union.clamp_(min=1e-9)
-        # Indices of active_later that get suppressed.
-        sup_local = iou >= iou_thresh
-        if bool(sup_local.any()):
-            # Translate back into the keep_mask slice [pos+1:] coordinate
-            # frame. ``active_idx_in_slice`` is the position within the
-            # [pos+1:] view; suppress those slots.
-            active_idx_in_slice = torch.nonzero(active_mask, as_tuple=False).squeeze(1)
-            kill = active_idx_in_slice[sup_local]
-            keep_mask[pos + 1 + kill] = False
         kept_count += 1
-        if kept_count and (kept_count % 500 == 0):
+        # Spheres of peak i and j overlap iff ||c_i - c_j|| < r_i + r_j;
+        # ``r_i + max_radius`` is conservative so the query returns a
+        # superset (no false negatives).
+        nbrs = tree.query_ball_point(centers[i], r=float(radii[i] + max_radius))
+        if not nbrs:
+            continue
+        nbrs = np.fromiter(nbrs, dtype=np.int64, count=len(nbrs))
+        # Keep only neighbours that are lower-score (so visiting i
+        # decides their fate) and not yet suppressed.
+        mask = (rank[nbrs] > pos) & ~suppressed[nbrs]
+        nbrs = nbrs[mask]
+        if len(nbrs) == 0:
+            continue
+        # Vectorised bbox IoU between peak i and its candidate neighbours.
+        inter_lo = np.maximum(lo[i], lo[nbrs])
+        inter_hi = np.minimum(hi[i], hi[nbrs])
+        inter = np.clip(inter_hi - inter_lo, 0.0, None).prod(axis=1)
+        union = vol[i] + vol[nbrs] - inter
+        iou = inter / np.clip(union, 1e-9, None)
+        kill = nbrs[iou >= iou_thresh]
+        if len(kill):
+            suppressed[kill] = True
+        if kept_count and (kept_count % 1000 == 0):
             pbar.set_postfix_str(f"kept={kept_count}")
 
-    kept_pos = torch.nonzero(keep_mask, as_tuple=False).squeeze(1)
-    return order[kept_pos].cpu().numpy()
+    return order[~suppressed[order]]
 
 
 def _nms_polyhedra(*, centers, dists, scores, rays, vol_shape, iou_thresh, faces=None):
-    """Greedy NMS via 3D bbox-IoU on the GPU, then rasterise only the
-    survivors for label-painting.
+    """Greedy NMS via 3D bbox-IoU with a KDTree spatial pre-filter,
+    then rasterise only the survivors for label-painting.
 
-    Replaces the original Python-side per-peak polyhedron-rasterise
-    inside a quadratic loop, which was the dominant cost of
-    :func:`nms_to_labels` for under-trained or noisy models. Bounding-
-    box IoU is the same approximation the upstream StarDist
-    implementation uses; for tightly packed nuclei you may want to
-    raise ``nms_thresh`` slightly (boxes overlap more than the
-    inscribed polyhedra do) to recover separation.
+    Algorithm ported from the original stardist C++/OpenMP
+    implementation (without depending on the stardist / keras package):
+    KDTree narrows each peak's overlap check to its bounding-sphere
+    neighbourhood, so the work is O(N × k) instead of the O(N²) the
+    naive polyhedron rasterise loop costs. For under-trained or noisy
+    models that detect ~30k peaks per frame this is the difference
+    between a few seconds and "won't finish today". Bbox IoU is the
+    same approximation the upstream stardist NMS uses (with
+    ``use_bbox=True``); for very tightly packed nuclei you may want to
+    raise ``nms_thresh`` slightly because bboxes overlap more than the
+    inscribed polyhedra do.
     """
-    kept_idx_arr = _bbox_nms_gpu(
+    kept_idx_arr = _bbox_nms_kdtree(
         centers=centers,
         dists=dists,
         scores=scores,
