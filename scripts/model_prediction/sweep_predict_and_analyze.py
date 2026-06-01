@@ -71,7 +71,7 @@ n_tiles = (1, 8, 8)
 # Per-tile batch size inside ``predict_volume``. Default of 4 underuses
 # a V100; bump to 16 for ~3× wall-clock gain when VRAM allows. Drop back
 # to 4 if you OOM mid-frame.
-predict_batch_size = 16
+predict_batch_size = 8
 
 # IoU thresholds at which prediction quality is scored.
 iou_threshs = (0.3, 0.5, 0.7)
