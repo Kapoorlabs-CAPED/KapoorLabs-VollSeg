@@ -77,13 +77,15 @@ def _human(t: float) -> str:
 
 
 # %% ─── paths (edit per cluster) ─────────────────────────────────────
-sweep_root = Path("/mnt/jean-zay/models_stardist_pytorch_sweep/")
-input_dir = Path("/mnt/jean-zay/demo_data/")
+sweep_root = Path(
+    "/lustre/fsn1/projects/rech/jsy/uzj81mi/models_stardist_pytorch_sweep/"
+)
+input_dir = Path("/lustre/fsn1/projects/rech/jsy/uzj81mi/demo_data/")
 input_pattern = "*.tif"
 
 # Keras reference TIFFs to score against — must have the same basenames
 # as the inputs (i.e. ``timelapse_fifth_dataset.tif`` here, etc.).
-keras_dir = Path("/mnt/jean-zay/demo_data/keras_prediction/")
+keras_dir = Path("/lustre/fsn1/projects/rech/jsy/uzj81mi/demo_data/keras_prediction/")
 
 # Skip these runs (chosen after sweep_stardist_analyze.py): the lr=10
 # tag (``lr1p0ep1``) blows up early and SGD never catches the leaders.
