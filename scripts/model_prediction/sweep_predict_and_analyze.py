@@ -2,19 +2,25 @@
 
 For every trained model folder under ``sweep_root/`` (one per
 optimizer × LR × scheduler combo produced by
-``slurm_sweep_stardist_jeanzay.sh``):
+``slurm_sweep_stardist_jeanzay.sh``) that survives the
+``skip_name_substrings`` filter:
 
 1. Load the model via :meth:`StarDistSegmenter.from_folder` — reads the
    ``training_config.json`` + ``rays.npy`` sidecars automatically.
-2. Run tiled / DDP-sharded prediction on every TIFF in ``input_dir``
-   (timelapse-aware: 4D inputs are sharded across ``devices`` GPUs).
+2. Run tiled / DDP-sharded prediction on every TIFF in ``input_dir``,
+   but only on the **first ``subset_n_each``, middle ``subset_n_each``
+   and last ``subset_n_each`` timepoints** of each 4D timelapse — i.e.
+   15 frames total at the default. Cuts a full-sweep prediction from
+   N×T frames down to N×15 so 14 sweep runs can be ranked by IoU in
+   tractable time.
 3. Compare each prediction to the matching keras reference TIFF under
-   ``keras_dir``. Streams one timepoint at a time so peak memory is
-   ~2 frames, not the whole stack.
+   ``keras_dir`` at exactly those original timepoints (the keras stack
+   is full-T, so we index into it).
 4. Read the final ``val_loss`` / ``train_loss`` off ``metrics.csv``.
-5. Aggregate everything into ``sweep_root/sweep_summary.csv`` and
-   print the **best by prediction accuracy** + **best by training
-   val_loss**.
+5. Aggregate everything into
+   ``stardist_sweeps/sweep_predict_summary.csv`` next to the
+   training-time ``sweep_summary.csv`` and print **best by prediction
+   accuracy** + **best by training val_loss**.
 
 Edit the paths block at the top, then ``python sweep_predict_and_analyze.py``.
 """
@@ -71,15 +77,24 @@ def _human(t: float) -> str:
 
 
 # %% ─── paths (edit per cluster) ─────────────────────────────────────
-sweep_root = Path(
-    "/lustre/fsn1/projects/rech/jsy/uzj81mi/models_stardist_pytorch_sweep/"
-)
-input_dir = Path("/lustre/fsn1/projects/rech/jsy/uzj81mi/demo_data/")
+sweep_root = Path("/mnt/jean-zay/models_stardist_pytorch_sweep/")
+input_dir = Path("/mnt/jean-zay/demo_data/")
 input_pattern = "*.tif"
 
 # Keras reference TIFFs to score against — must have the same basenames
 # as the inputs (i.e. ``timelapse_fifth_dataset.tif`` here, etc.).
-keras_dir = Path("/lustre/fsn1/projects/rech/jsy/uzj81mi/demo_data/keras_prediction/")
+keras_dir = Path("/mnt/jean-zay/demo_data/keras_prediction/")
+
+# Skip these runs (chosen after sweep_stardist_analyze.py): the lr=10
+# tag (``lr1p0ep1``) blows up early and SGD never catches the leaders.
+skip_name_substrings = ("lr1p0ep1", "_sgd_")
+
+# Subset of timepoints to predict / score on, instead of the whole
+# timelapse. We take the first ``n_each``, a centred middle ``n_each``,
+# and the last ``n_each`` frames; volumes shorter than ~3·n_each fall
+# back to the full T-axis. Reduces a sweep from N×T frames down to
+# N×min(15, T) so we can rank 14 models by IoU in tractable time.
+subset_n_each = 5
 
 # Multi-GPU sweep prediction knobs. ``predict_timelapse`` shards the
 # T axis across DDP ranks via Lightning's ``DistributedSampler`` — each
@@ -112,8 +127,13 @@ iou_threshs = (0.3, 0.5, 0.7)
 primary_metric = "accuracy"
 primary_iou = 0.5
 
-# Where to write the summary CSV.
-summary_csv = sweep_root / "sweep_summary.csv"
+# Where to write the summary CSV. Sibling of sweep_stardist_analyze.py's
+# stardist_sweeps/ folder under the script dir, so the training-time
+# summary and the prediction-quality summary sit next to each other.
+script_dir = Path(__file__).resolve().parent
+results_folder = script_dir / "stardist_sweeps"
+results_folder.mkdir(parents=True, exist_ok=True)
+summary_csv = results_folder / "sweep_predict_summary.csv"
 
 
 # %% ─── lazy frame loader (shared with compare_segmentations.py) ────
@@ -206,15 +226,72 @@ def _parse_sweep_tags(model_dir: Path) -> dict:
     }
 
 
-def _score_against_keras(pred_path: Path, keras_path: Path) -> dict:
+def _subset_timepoints(T: int, n_each: int = 5) -> list[int]:
+    """Return the indices of the first ``n_each``, middle ``n_each`` and
+    last ``n_each`` timepoints of a T-frame timelapse, deduplicated and
+    sorted. For ``T <= 3·n_each`` we just return ``range(T)``."""
+    if T <= 0:
+        return []
+    if T <= 3 * n_each:
+        return list(range(T))
+    first = list(range(0, n_each))
+    mid_start = max(n_each, (T - n_each) // 2)
+    mid_start = min(mid_start, T - 2 * n_each)
+    mid = list(range(mid_start, mid_start + n_each))
+    last = list(range(T - n_each, T))
+    return sorted(set(first + mid + last))
+
+
+def _score_against_keras(
+    pred_path: Path,
+    keras_path: Path,
+    keras_indices: list[int] | None = None,
+) -> dict:
     """Stream both stacks frame by frame through ``matching_dataset``.
-    Returns a flat dict keyed ``<metric>@iou<thr>``."""
+
+    When ``keras_indices`` is given, the prediction TIFF is assumed to
+    hold one frame per index (in the order of ``keras_indices``) and
+    the keras reference is read at exactly those timepoints. Without
+    indices we fall back to the full-stack comparison.
+
+    Returns a flat dict keyed ``<metric>@iou<thr>``.
+    """
     with _LazyFrames(pred_path) as pred, _LazyFrames(keras_path) as ref:
-        if len(pred) != len(ref) or pred.shape != ref.shape:
-            return {
-                "matching_error": (f"shape mismatch: pred={pred.shape} ref={ref.shape}")
-            }
-        stats = matching_dataset(ref, pred, thresh=iou_threshs, show_progress=True)
+        if keras_indices is not None:
+            if len(pred) != len(keras_indices):
+                return {
+                    "matching_error": (
+                        f"pred frames ({len(pred)}) != requested "
+                        f"keras indices ({len(keras_indices)})"
+                    )
+                }
+            if max(keras_indices) >= len(ref):
+                return {
+                    "matching_error": (
+                        f"keras stack has {len(ref)} frames but indices "
+                        f"go up to {max(keras_indices)}"
+                    )
+                }
+            pred_frames = [pred[t] for t in range(len(pred))]
+            ref_frames = [ref[t] for t in keras_indices]
+            if pred_frames[0].shape != ref_frames[0].shape:
+                return {
+                    "matching_error": (
+                        f"frame shape mismatch: pred={pred_frames[0].shape} "
+                        f"ref={ref_frames[0].shape}"
+                    )
+                }
+            stats = matching_dataset(
+                ref_frames, pred_frames, thresh=iou_threshs, show_progress=True
+            )
+        else:
+            if len(pred) != len(ref) or pred.shape != ref.shape:
+                return {
+                    "matching_error": (
+                        f"shape mismatch: pred={pred.shape} ref={ref.shape}"
+                    )
+                }
+            stats = matching_dataset(ref, pred, thresh=iou_threshs, show_progress=True)
     flat = {}
     for thr, m in zip(iou_threshs, stats):
         for k in (
@@ -234,12 +311,22 @@ def _score_against_keras(pred_path: Path, keras_path: Path) -> dict:
 
 
 # %% ─── walk the sweep ──────────────────────────────────────────────
-model_dirs = sorted(p for p in sweep_root.iterdir() if p.is_dir())
+all_model_dirs = sorted(p for p in sweep_root.iterdir() if p.is_dir())
+model_dirs = [
+    p for p in all_model_dirs if not any(tag in p.name for tag in skip_name_substrings)
+]
+skipped = [p.name for p in all_model_dirs if p not in model_dirs]
 input_files = sorted(input_dir.glob(input_pattern))
 print(f"Sweep root:    {sweep_root}")
-print(f"Models found:  {len(model_dirs)}")
+print(
+    f"Models found:  {len(all_model_dirs)} (kept {len(model_dirs)}, "
+    f"skipped {len(skipped)} matching {skip_name_substrings})"
+)
+for name in skipped:
+    print(f"   skip → {name}")
 print(f"Inputs:        {len(input_files)} TIFFs from {input_dir}")
 print(f"Keras refs:    {keras_dir}")
+print(f"Timepoints:    first/mid/last {subset_n_each} per timelapse")
 print(
     f"Ranking by:    {primary_metric}@iou={primary_iou} (prediction) + "
     f"val_loss_final (training)"
@@ -257,7 +344,10 @@ for i, model_dir in enumerate(model_dirs):
         f"(opt={tags['optimizer']} lr={tags['learning_rate']} "
         f"sched={tags['scheduler']})"
     )
-    pred_dir = model_dir / "predictions"
+    # Separate dir from full-volume predictions so an existing
+    # ``predictions/<name>.tif`` from an earlier run can't shadow the
+    # subset prediction we want to score here.
+    pred_dir = model_dir / "predictions_subset"
     pred_dir.mkdir(exist_ok=True)
 
     try:
@@ -278,6 +368,9 @@ for i, model_dir in enumerate(model_dirs):
     per_file_scores = []
     for j, f in enumerate(input_files):
         out_path = pred_dir / f.name
+        # Remember which original timepoints made it into the subset so
+        # we can fetch the matching keras frames at scoring time.
+        keras_indices: list[int] | None = None
         if not out_path.is_file():
             t_pred = time.perf_counter()
             print(
@@ -285,10 +378,16 @@ for i, model_dir in enumerate(model_dirs):
             )
             vol = imread(f)
             print(
-                f"   [{j + 1}/{len(input_files)}] predicting "
-                f"shape={tuple(vol.shape)} dtype={vol.dtype}",
+                f"   [{j + 1}/{len(input_files)}] full shape={tuple(vol.shape)} "
+                f"dtype={vol.dtype}",
             )
             if vol.ndim == 4:
+                keras_indices = _subset_timepoints(vol.shape[0], subset_n_each)
+                vol = vol[keras_indices]
+                print(
+                    f"   [{j + 1}/{len(input_files)}] subset T-indices "
+                    f"{keras_indices} → predicting shape={tuple(vol.shape)}",
+                )
                 # Every DDP rank participates in ``predict_timelapse`` —
                 # Lightning's DistributedSampler hands each rank a
                 # disjoint subset of timepoints (by index) and the
@@ -327,9 +426,16 @@ for i, model_dir in enumerate(model_dirs):
                 f"in {_human(time.perf_counter() - t_pred)}"
             )
         else:
+            # Recover the index list from the (untouched) input TIFF
+            # so we still score against the matching keras frames on
+            # a re-run that re-uses cached predictions.
+            with TiffFile(f) as tf:
+                shp = tuple(tf.series[0].shape)
+            if len(shp) == 4:
+                keras_indices = _subset_timepoints(shp[0], subset_n_each)
             print(
                 f"   [{j + 1}/{len(input_files)}] {out_path.name} already "
-                f"exists — skipping predict"
+                f"exists — skipping predict (T-indices {keras_indices})"
             )
 
         # ── score against keras ref ──
@@ -339,7 +445,9 @@ for i, model_dir in enumerate(model_dirs):
             continue
         t_score = time.perf_counter()
         print(f"   [{j + 1}/{len(input_files)}] scoring vs keras ref…")
-        per_file_scores.append(_score_against_keras(out_path, keras_path))
+        per_file_scores.append(
+            _score_against_keras(out_path, keras_path, keras_indices=keras_indices)
+        )
         print(
             f"   [{j + 1}/{len(input_files)}] scored in "
             f"{_human(time.perf_counter() - t_score)}"

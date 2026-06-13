@@ -41,7 +41,7 @@ import pandas as pd
 
 
 # %% ─── paths (edit per cluster) ─────────────────────────────────────
-sweep_root = Path("/home/debian/jean-zay/models_stardist_pytorch_sweep")
+sweep_root = Path("/mnt/jean-zay/models_stardist_pytorch_sweep")
 
 # Folder-name pattern produced by slurm_sweep_stardist_jeanzay.sh:
 #   stardist_sweep_<opt>_lr<lr_tag>_<sched>
@@ -53,10 +53,13 @@ top_k = 5
 # Primary metric ranking. Lower is better for every loss column.
 primary_metric = "val_loss_best"
 
+script_dir = Path(__file__).resolve().parent
+results_folder = script_dir / "stardist_sweeps"
+results_folder.mkdir(parents=True, exist_ok=True)
 # Outputs (written next to sweep_root).
-summary_csv = sweep_root / "sweep_summary.csv"
-plot_png = sweep_root / "sweep_val_loss_curves.png"
-best_txt = sweep_root / "sweep_best_models.txt"
+summary_csv = results_folder / "sweep_summary.csv"
+plot_png = results_folder / "sweep_val_loss_curves.png"
+best_txt = results_folder / "sweep_best_models.txt"
 
 
 # %% ─── name parser ─────────────────────────────────────────────────

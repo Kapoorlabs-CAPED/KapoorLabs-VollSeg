@@ -1,0 +1,20 @@
+── BEST BY VAL_LOSS (lower is better, top 5) ──
+  val_loss_best=0.248832  stardist_sweep_lars_lr1p0ep1_cosine                          opt=lars   lr=10.0       sched=cosine         epochs=99
+  val_loss_best=0.250067  stardist_sweep_adam_lr1p0e-2_noscheduler                     opt=adam   lr=0.01       sched=noscheduler    epochs=99
+  val_loss_best=0.253342  stardist_sweep_lars_lr1p0ep0_noscheduler                     opt=lars   lr=1.0        sched=noscheduler    epochs=99
+  val_loss_best=0.255312  stardist_sweep_adam_lr1p0e-2_cosine                          opt=adam   lr=0.01       sched=cosine         epochs=99
+  val_loss_best=0.260249  stardist_sweep_adam_lr1p0e-3_noscheduler                     opt=adam   lr=0.001      sched=noscheduler    epochs=99
+
+── BEST BY VAL_PROB_LOSS final (lower is better, top 5) ──
+  val_prob_loss_final=0.055798  stardist_sweep_lars_lr1p0ep1_cosine                          opt=lars   lr=10.0       sched=cosine
+  val_prob_loss_final=0.055872  stardist_sweep_adam_lr1p0e-2_cosine                          opt=adam   lr=0.01       sched=cosine
+  val_prob_loss_final=0.056075  stardist_sweep_adam_lr1p0e-3_cosine                          opt=adam   lr=0.001      sched=cosine
+  val_prob_loss_final=0.056166  stardist_sweep_lars_lr1p0ep0_cosine                          opt=lars   lr=1.0        sched=cosine
+  val_prob_loss_final=0.056241  stardist_sweep_lars_lr1p0e-1_noscheduler                     opt=lars   lr=0.1        sched=noscheduler
+
+── BEST BY VAL_DIST_LOSS final (lower is better, top 5) ──
+  val_dist_loss_final=0.958891  stardist_sweep_adam_lr1p0e-2_noscheduler                     opt=adam   lr=0.01       sched=noscheduler
+  val_dist_loss_final=0.996394  stardist_sweep_lars_lr1p0ep1_cosine                          opt=lars   lr=10.0       sched=cosine
+  val_dist_loss_final=1.025230  stardist_sweep_adam_lr1p0e-3_noscheduler                     opt=adam   lr=0.001      sched=noscheduler
+  val_dist_loss_final=1.030138  stardist_sweep_adam_lr1p0e-2_cosine                          opt=adam   lr=0.01       sched=cosine
+  val_dist_loss_final=1.047692  stardist_sweep_lars_lr1p0ep0_cosine                          opt=lars   lr=1.0        sched=cosine
