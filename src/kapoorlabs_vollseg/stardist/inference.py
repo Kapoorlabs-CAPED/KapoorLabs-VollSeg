@@ -35,7 +35,6 @@ from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 
 from .._lightning.dataset import CarePredictionDataset, compute_tile_shape
-from .._lightning.transforms import PercentileNormalize
 from .lightning_module import StarDistModule
 
 
@@ -309,17 +308,32 @@ def _predict_and_stitch(
 ) -> tuple[np.ndarray, np.ndarray]:
     n = tuple(n_tiles) if n_tiles is not None else tuple(model.n_tiles)
     tile_shape = compute_tile_shape(image.shape, n)
-    normalizer = (
-        PercentileNormalize(pmin=pmin, pmax=pmax)
-        if pmin is not None and pmax is not None
-        else None
-    )
+
+    # Percentile-normalise the **whole** volume once, BEFORE tiling.
+    # The training pipeline normalises the full source volume
+    # (``pmin``..``pmax``) and then cuts training patches out of that
+    # already-normalised volume, so the model is trained on inputs
+    # scaled against the *image-wide* intensity distribution. To
+    # reproduce that exactly at inference we have to normalise the
+    # whole input first, then tile. The previous code passed
+    # ``PercentileNormalize`` to ``CarePredictionDataset`` which
+    # then re-applied it **per tile** — a tile on dark background
+    # would get its few faint pixels stretched to [0, 1] and look
+    # to the model like full-brightness cells, collapsing the
+    # predictions on dim tiles. Same shape as CSBDeep / stardist's
+    # ``normalize(img)`` before ``predict_instances``.
+    image = np.ascontiguousarray(image, dtype=np.float32)
+    if pmin is not None and pmax is not None:
+        flat = image.ravel()
+        lo = float(np.percentile(flat, pmin))
+        hi = float(np.percentile(flat, pmax))
+        image = (image - lo) / (hi - lo + 1e-8)
 
     dataset = CarePredictionDataset(
-        volume=image.astype(np.float32),
+        volume=image,
         tile_shape=tile_shape,
         overlap=tile_overlap,
-        normalizer=normalizer,
+        normalizer=None,  # already normalised whole-volume above
     )
     loader = DataLoader(
         dataset, batch_size=batch_size, num_workers=num_workers, shuffle=False

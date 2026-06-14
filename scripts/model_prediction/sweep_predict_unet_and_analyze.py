@@ -1,28 +1,35 @@
-"""Sweep prediction + analysis for StarDist.
+"""Sweep prediction + analysis for U-Net (sibling of the StarDist sweep).
 
 For every trained model folder under ``sweep_root/`` (one per
 optimizer × LR × scheduler combo produced by
-``slurm_sweep_stardist_jeanzay.sh``) that survives the
+``slurm_sweep_unet_jeanzay.sh``) that survives the
 ``skip_name_substrings`` filter:
 
-1. Load the model via :meth:`StarDistSegmenter.from_folder` — reads the
-   ``training_config.json`` + ``rays.npy`` sidecars automatically.
+1. Load the model via :meth:`UNetSegmenter.from_folder` — reads the
+   ``training_config.json`` sidecar automatically.
 2. Run tiled / DDP-sharded prediction on every TIFF in ``input_dir``,
    but only on the **first ``subset_n_each``, middle ``subset_n_each``
    and last ``subset_n_each`` timepoints** of each 4D timelapse — i.e.
    15 frames total at the default. Cuts a full-sweep prediction from
-   N×T frames down to N×15 so 14 sweep runs can be ranked by IoU in
+   N×T frames down to N×15 so all sweep runs can be ranked by IoU in
    tractable time.
 3. Compare each prediction to the matching keras reference TIFF under
-   ``keras_dir`` at exactly those original timepoints (the keras stack
-   is full-T, so we index into it).
+   ``keras_dir`` at exactly those original timepoints. The keras
+   reference is the same StarDist instance-label TIFF the StarDist
+   sweep scores against, so the two sweeps are directly comparable.
 4. Read the final ``val_loss`` / ``train_loss`` off ``metrics.csv``.
 5. Aggregate everything into
-   ``stardist_sweeps/sweep_predict_summary.csv`` next to the
+   ``unet_sweeps/sweep_predict_summary.csv`` next to the
    training-time ``sweep_summary.csv`` and print **best by prediction
    accuracy** + **best by training val_loss**.
 
-Edit the paths block at the top, then ``python sweep_predict_and_analyze.py``.
+U-Net's binary semantic map is converted to per-frame instance labels
+via connected-component labelling (``scipy.ndimage.label``) before
+scoring, so the keras instance-label reference can be matched
+component-by-component with the same ``matching_dataset`` routine the
+StarDist sweep uses.
+
+Edit the paths block at the top, then ``python sweep_predict_unet_and_analyze.py``.
 """
 
 # %%
@@ -42,8 +49,7 @@ import torch
 import torch.distributed as dist
 from tifffile import TiffFile, imread, imwrite
 
-from kapoorlabs_vollseg import StarDistSegmenter, predict_timelapse
-from kapoorlabs_vollseg._backbones._config import read_thresholds
+from kapoorlabs_vollseg import UNetSegmenter, predict_timelapse
 from kapoorlabs_vollseg.eval import matching_dataset
 
 # Same opt-in gate as kapoorlabs_vollseg.stardist.inference uses. We
@@ -87,9 +93,7 @@ def _human(t: float) -> str:
 
 
 # %% ─── paths (edit per cluster) ─────────────────────────────────────
-sweep_root = Path(
-    "/lustre/fsn1/projects/rech/jsy/uzj81mi/models_stardist_pytorch_sweep/"
-)
+sweep_root = Path("/lustre/fsn1/projects/rech/jsy/uzj81mi/models_unet_pytorch_sweep/")
 input_dir = Path("/lustre/fsn1/projects/rech/jsy/uzj81mi/demo_data/")
 input_pattern = "*.tif"
 
@@ -97,8 +101,8 @@ input_pattern = "*.tif"
 # as the inputs (i.e. ``timelapse_fifth_dataset.tif`` here, etc.).
 keras_dir = Path("/lustre/fsn1/projects/rech/jsy/uzj81mi/demo_data/keras_prediction/")
 
-# Skip these runs (chosen after sweep_stardist_analyze.py): the lr=10
-# tag (``lr1p0ep1``) blows up early and SGD never catches the leaders.
+# Skip these runs (chosen after sweep_unet_analyze.py): the lr=10 tag
+# (``lr1p0ep1``) blows up early and SGD never catches the leaders.
 skip_name_substrings = ("lr1p0ep1", "_sgd_")
 
 # Subset of timepoints to predict / score on, instead of the whole
@@ -115,14 +119,14 @@ subset_n_each = 5
 #
 #     <input_dir>/
 #     ├── timelapse_fifth_dataset.tif                                    ← input
-#     └── predictions/
-#         ├── stardist_sweep_adam_lr1p0e-2_noscheduler/
+#     └── predictions_unet/
+#         ├── unet_sweep_adam_lr1p0e-3_noscheduler/
 #         │   ├── timelapse_fifth_dataset.tif                            ← prediction
 #         │   └── timelapse_fifth_dataset.keras_indices.json             ← sidecar
-#         ├── stardist_sweep_lars_lr1p0ep0_noscheduler/
+#         ├── unet_sweep_lars_lr1p0e-1_noscheduler/
 #         │   └── …
 #         └── …
-predictions_root = input_dir / "predictions"
+predictions_root = input_dir / "predictions_unet"
 
 # Wipe every per-model prediction TIFF + sidecar before predicting, so
 # a sweep that uses an updated model arch / threshold / config doesn't
@@ -161,11 +165,11 @@ iou_threshs = (0.3, 0.5, 0.7)
 primary_metric = "accuracy"
 primary_iou = 0.5
 
-# Where to write the summary CSV. Sibling of sweep_stardist_analyze.py's
-# stardist_sweeps/ folder under the script dir, so the training-time
+# Where to write the summary CSV. Sibling of sweep_unet_analyze.py's
+# unet_sweeps/ folder under the script dir, so the training-time
 # summary and the prediction-quality summary sit next to each other.
 script_dir = Path(__file__).resolve().parent
-results_folder = script_dir / "stardist_sweeps"
+results_folder = script_dir / "unet_sweeps"
 results_folder.mkdir(parents=True, exist_ok=True)
 summary_csv = results_folder / "sweep_predict_summary.csv"
 
@@ -232,7 +236,7 @@ def _final_train_metrics(model_dir: Path) -> dict:
 
 def _parse_sweep_tags(model_dir: Path) -> dict:
     """Parse optimizer / lr / scheduler out of the model dir name (the
-    sweep script writes ``stardist_sweep_<opt>_lr<tag>_<sched>``).
+    sweep script writes ``unet_sweep_<opt>_lr<tag>_<sched>``).
     Falls back to reading ``training_config.json`` when the dir name
     doesn't follow the sweep convention."""
     name = model_dir.name
@@ -400,18 +404,12 @@ for i, model_dir in enumerate(model_dirs):
         print(f"   force_repredict=True — cleared {pred_dir}")
 
     try:
-        star = StarDistSegmenter.from_folder(model_dir, batch_size=predict_batch_size)
+        seg = UNetSegmenter.from_folder(model_dir, batch_size=predict_batch_size)
     except FileNotFoundError as e:
         print(f"   ✗ no checkpoint: {e}")
         continue
 
-    overrides = read_thresholds(model_dir)
-    prob_thresh = overrides.get("prob_thresh", 0.5)
-    nms_thresh = overrides.get("nms_thresh", 0.3)
-    print(
-        f"   loaded  prob_thresh={prob_thresh}  nms_thresh={nms_thresh}  "
-        f"n_tiles={n_tiles}"
-    )
+    print(f"   loaded  n_tiles={n_tiles}  (binary semantic + CC for instances)")
 
     # ── predict each input ──
     per_file_scores = []
@@ -448,43 +446,28 @@ for i, model_dir in enumerate(model_dirs):
                 # the post-predict scoring / TIFF-write naturally
                 # short-circuits on them.
                 out = predict_timelapse(
-                    star,
+                    seg,
                     vol,
                     devices=devices,
                     accelerator=accelerator,
                     strategy=strategy,
-                    # Lightning's rich progress bar suffers the same
-                    # newline-spam issue under SLURM as our tqdm bars;
-                    # gate on the env var. Our own ``bar_desc`` bar
-                    # below is the single per-model progress line.
                     enable_progress_bar=_INTERACTIVE,
                     bar_desc=f"[{i + 1}/{len(model_dirs)}] {tags['experiment']}",
-                    prob_thresh=prob_thresh,
-                    nms_thresh=nms_thresh,
                     n_tiles=n_tiles,
                 )
                 if not out:  # non-zero DDP rank — skip the rank-0 work
                     continue
+                # ``UNetSegmenter`` already returns CC instance labels
+                # (multi-Otsu → connected components → size-filter), so
+                # we can write ``out["labels"]`` straight to TIFF.
                 labels_tzyx = np.stack(
                     [out["labels"][t] for t in range(out["labels"].shape[0])],
                     axis=0,
                 )
-                # ``nms_to_labels`` returns uint16 natively; preserve
-                # that on disk (16-bit = half the size of uint32, and
-                # tifffile can occasionally surface a 32-bit label TIFF
-                # as float-like depending on the viewer reading it).
                 imwrite(out_path, np.ascontiguousarray(labels_tzyx, dtype=np.uint16))
-                # Persist the exact T-indices used so a re-run picks
-                # up the same alignment even if ``subset_n_each``
-                # was changed in between.
                 indices_path.write_text(json.dumps(keras_indices))
             else:
-                result = star.predict(
-                    vol,
-                    prob_thresh=prob_thresh,
-                    nms_thresh=nms_thresh,
-                    n_tiles=n_tiles,
-                )
+                result = seg.predict(vol, n_tiles=n_tiles)
                 imwrite(out_path, np.ascontiguousarray(result.labels, dtype=np.uint16))
             print(
                 f"   [{j + 1}/{len(input_files)}] wrote {out_path.name} "
@@ -543,10 +526,10 @@ for i, model_dir in enumerate(model_dirs):
             f"{_human(time.perf_counter() - t_score)}"
         )
 
-    # Free the StarDist backbone from GPU before loading the next model.
-    # Otherwise 18 model loads in the same process pile up on the V100
+    # Free the U-Net backbone from GPU before loading the next model.
+    # Otherwise N model loads in the same process pile up on the V100
     # and we OOM mid-sweep rather than on tile-1 of model-1.
-    del star
+    del seg
     gc.collect()
     if torch.cuda.is_available():
         torch.cuda.empty_cache()

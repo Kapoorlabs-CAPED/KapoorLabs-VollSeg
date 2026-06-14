@@ -126,11 +126,26 @@ class CAREDenoiser:
         n = tuple(n_tiles) if n_tiles is not None else tuple(self.n_tiles)
         tile_shape = compute_tile_shape(image.shape, n)
 
+        # Percentile-normalise the WHOLE input once, before tiling.
+        # Per-tile normalisation (the old behaviour) stretches pure-
+        # background tiles' noise to [0, 1] and the denoiser then
+        # treats that noise as a high-signal input. Same fix as in
+        # ``stardist/inference.py::_predict_and_stitch`` and
+        # ``models/unet.py::UNetSegmenter.predict``.
+        image = np.ascontiguousarray(image, dtype=np.float32)
+        if self._normalizer is not None:
+            pmin = self._normalizer.pmin
+            pmax = self._normalizer.pmax
+            flat = image.ravel()
+            lo = float(np.percentile(flat, pmin))
+            hi = float(np.percentile(flat, pmax))
+            image = (image - lo) / (hi - lo + 1e-8)
+
         dataset = CarePredictionDataset(
-            volume=image.astype(np.float32),
+            volume=image,
             tile_shape=tile_shape,
             overlap=self.tile_overlap,
-            normalizer=self._normalizer,
+            normalizer=None,  # already normalised whole-volume above
         )
         loader = DataLoader(
             dataset,
