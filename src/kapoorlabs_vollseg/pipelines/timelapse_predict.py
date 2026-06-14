@@ -87,19 +87,29 @@ class TimelapsePredictor(LightningModule):
             return
         from tqdm import tqdm
 
-        # Compact bar format that shows ELAPSED < ETA on the right and
-        # the count + per-frame rate. ``miniters=1`` + ``mininterval=0``
-        # forces a tick every frame even in environments where tqdm
-        # would otherwise throttle updates; ``ncols=90`` caps the line
-        # width so it doesn't grab the whole terminal.
+        # Sexy single-line bar:
+        #   <desc> ▰▰▰▰▰▰▰▱▱▱▱▱▱▱▱  47% • 7/15 • 04:13<04:53 • 36.1s/it
+        # Unicode block chars build a filled / unfilled segment look that
+        # renders nicely even where ``\r`` doesn't fully erase, ANSI-256
+        # cyan for the filled portion. ``miniters=1`` + ``mininterval=0``
+        # forces a tick every frame.
+        bar_filled = "\033[36m▰\033[0m"
+        bar_empty = "\033[90m▱\033[0m"
+        fmt = (
+            "{desc} "
+            "{bar} "
+            "{percentage:3.0f}% • {n_fmt}/{total_fmt} "
+            "• {elapsed}<{remaining} • {rate_fmt}"
+        )
         self._pbar = tqdm(
             total=self._total_frames,
             desc=self._bar_desc,
-            unit="frame",
-            bar_format="{desc}: {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]",
+            unit="it",
+            bar_format=fmt,
+            ascii=bar_filled + bar_empty,
             leave=False,
             dynamic_ncols=False,
-            ncols=90,
+            ncols=110,
             miniters=1,
             mininterval=0.0,
         )

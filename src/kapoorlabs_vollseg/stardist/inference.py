@@ -262,15 +262,6 @@ def nms_to_labels(
     if centers.size == 0:
         return np.zeros(vol_shape, dtype=np.uint16)
 
-    # Surface the peak count before the (potentially O(N^2)) NMS so a
-    # pathological model (e.g. noisy prob map → tens of thousands of
-    # candidates) is visible up front instead of being a silent wait.
-    print(
-        f"  nms_to_labels: {len(centers)} peaks above prob_thresh="
-        f"{prob_thresh} (min_distance={min_distance})",
-        flush=True,
-    )
-
     scores = prob_map[tuple(centers.T)]
     dists = np.stack(
         [dist_map[(slice(None),) + tuple(c)] for c in centers], axis=0
