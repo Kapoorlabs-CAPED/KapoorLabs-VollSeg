@@ -33,6 +33,7 @@ import functools
 import gc
 import json
 import os
+import sys
 import time
 from pathlib import Path
 
@@ -45,6 +46,16 @@ from tifffile import TiffFile, imread, imwrite
 from kapoorlabs_vollseg import StarDistSegmenter, predict_timelapse
 from kapoorlabs_vollseg._backbones._config import read_thresholds
 from kapoorlabs_vollseg.eval import matching_dataset
+
+# Same TTY gate as kapoorlabs_vollseg.stardist.inference uses for its
+# internal tqdm bars. When the script's stderr isn't a terminal (SLURM
+# log, ``tee``, ``nohup``) tqdm writes a new line per update and the
+# nested per-tile / per-NMS-peak / per-cell bars from one frame can
+# spam thousands of lines. Set ``KAPOORLABS_VOLLSEG_PROGRESS=1`` to
+# force the bars on even in a non-TTY context.
+_INTERACTIVE = (
+    sys.stderr.isatty() or os.environ.get("KAPOORLABS_VOLLSEG_PROGRESS") == "1"
+)
 
 
 def _is_rank_zero() -> bool:
@@ -284,7 +295,10 @@ def _score_against_keras(
                     )
                 }
             stats = matching_dataset(
-                ref_frames, pred_frames, thresh=iou_threshs, show_progress=True
+                ref_frames,
+                pred_frames,
+                thresh=iou_threshs,
+                show_progress=_INTERACTIVE,
             )
         else:
             if len(pred) != len(ref) or pred.shape != ref.shape:
@@ -293,7 +307,12 @@ def _score_against_keras(
                         f"shape mismatch: pred={pred.shape} ref={ref.shape}"
                     )
                 }
-            stats = matching_dataset(ref, pred, thresh=iou_threshs, show_progress=True)
+            stats = matching_dataset(
+                ref,
+                pred,
+                thresh=iou_threshs,
+                show_progress=_INTERACTIVE,
+            )
     flat = {}
     for thr, m in zip(iou_threshs, stats):
         for k in (
@@ -370,8 +389,11 @@ for i, model_dir in enumerate(model_dirs):
     per_file_scores = []
     for j, f in enumerate(input_files):
         out_path = pred_dir / f.name
-        # Remember which original timepoints made it into the subset so
-        # we can fetch the matching keras frames at scoring time.
+        # Sidecar JSON next to the prediction TIFF records the exact
+        # T-indices that went into the subset. On a fresh run we write
+        # it after the predict; on a resume we read it back so a
+        # changed ``subset_n_each`` can't silently misalign frames.
+        indices_path = pred_dir / f"{f.stem}.keras_indices.json"
         keras_indices: list[int] | None = None
         if not out_path.is_file():
             t_pred = time.perf_counter()
@@ -403,7 +425,10 @@ for i, model_dir in enumerate(model_dirs):
                     devices=devices,
                     accelerator=accelerator,
                     strategy=strategy,
-                    enable_progress_bar=True,
+                    # Lightning's rich progress bar suffers the same
+                    # newline-spam issue under SLURM as our tqdm bars;
+                    # gate on the same TTY check.
+                    enable_progress_bar=_INTERACTIVE,
                     prob_thresh=prob_thresh,
                     nms_thresh=nms_thresh,
                     n_tiles=n_tiles,
@@ -415,6 +440,10 @@ for i, model_dir in enumerate(model_dirs):
                     axis=0,
                 )
                 imwrite(out_path, labels_tzyx.astype(np.uint32))
+                # Persist the exact T-indices used so a re-run picks
+                # up the same alignment even if ``subset_n_each``
+                # was changed in between.
+                indices_path.write_text(json.dumps(keras_indices))
             else:
                 result = star.predict(
                     vol,
@@ -428,16 +457,41 @@ for i, model_dir in enumerate(model_dirs):
                 f"in {_human(time.perf_counter() - t_pred)}"
             )
         else:
-            # Recover the index list from the (untouched) input TIFF
-            # so we still score against the matching keras frames on
-            # a re-run that re-uses cached predictions.
-            with TiffFile(f) as tf:
-                shp = tuple(tf.series[0].shape)
-            if len(shp) == 4:
-                keras_indices = _subset_timepoints(shp[0], subset_n_each)
+            # Recover the index list. Prefer the sidecar JSON if it
+            # exists (it was written at predict time, so it's the
+            # authoritative record of which T-indices the cached
+            # prediction TIFF actually holds). Fall back to recomputing
+            # from the input TIFF only when the sidecar is missing
+            # (legacy cached runs from before the sidecar was written).
+            if indices_path.is_file():
+                keras_indices = json.loads(indices_path.read_text())
+                source = "sidecar"
+            else:
+                with TiffFile(f) as tf:
+                    shp = tuple(tf.series[0].shape)
+                if len(shp) == 4:
+                    keras_indices = _subset_timepoints(shp[0], subset_n_each)
+                source = "recomputed (no sidecar)"
+            # Belt-and-braces: cross-check the cached TIFF's T length
+            # against the index list. A mismatch means a stale cache
+            # from a different ``subset_n_each`` — skip it to avoid
+            # scoring nonsense.
+            with TiffFile(out_path) as tf:
+                pred_T = tf.series[0].shape[0] if len(tf.series[0].shape) == 4 else 1
+            if keras_indices is not None and pred_T != len(keras_indices):
+                print(
+                    f"   [{j + 1}/{len(input_files)}] {out_path.name} cached with "
+                    f"{pred_T} frames but index list has {len(keras_indices)} entries "
+                    f"({source}) — DELETING cached prediction and re-predicting"
+                )
+                out_path.unlink()
+                indices_path.unlink(missing_ok=True)
+                # back up and re-run this iteration
+                continue
             print(
                 f"   [{j + 1}/{len(input_files)}] {out_path.name} already "
-                f"exists — skipping predict (T-indices {keras_indices})"
+                f"exists — skipping predict (T-indices {keras_indices}, "
+                f"from {source})"
             )
 
         # ── score against keras ref ──

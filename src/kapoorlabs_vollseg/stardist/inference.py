@@ -22,6 +22,9 @@ for very few rays a multi-ray interpolation would be more accurate.
 
 from __future__ import annotations
 
+import os
+import sys
+import time
 from dataclasses import dataclass
 from typing import Optional
 
@@ -35,6 +38,34 @@ from tqdm.auto import tqdm
 from .._lightning.dataset import CarePredictionDataset, compute_tile_shape
 from .._lightning.transforms import PercentileNormalize
 from .lightning_module import StarDistModule
+
+
+# Whether the inner ``tqdm`` bars (per-tile, per-NMS-peak, per-painted
+# polyhedron) should actually render. In an interactive terminal they
+# carriage-return in place and erase on completion (``leave=False``)
+# so each phase replaces the previous one; in a non-TTY context (SLURM
+# log, ``tee``, ``nohup`` redirect) tqdm prints newlines instead so
+# the per-frame work spams thousands of lines. Default to *disabled*
+# when stderr isn't a TTY; opt back in with
+# ``KAPOORLABS_VOLLSEG_PROGRESS=1`` if you really want all the bars.
+_SHOW_INNER_PROGRESS = (
+    sys.stderr.isatty() or os.environ.get("KAPOORLABS_VOLLSEG_PROGRESS") == "1"
+)
+
+
+def _phase_status(desc: str, n_items: int, elapsed: float, unit: str) -> None:
+    """One-liner that emits "phase done" status when the live tqdm
+    inside that phase is disabled (non-TTY). In a TTY the bar already
+    self-erases via ``leave=False`` so this print would be redundant
+    chatter — gate accordingly.
+    """
+    if _SHOW_INNER_PROGRESS:
+        return
+    rate = n_items / elapsed if elapsed > 0 else 0.0
+    print(
+        f"  {desc} done — {n_items} {unit} in {elapsed:.1f}s " f"({rate:.1f} {unit}/s)",
+        flush=True,
+    )
 
 
 # ============================================================== top-level API
@@ -316,15 +347,18 @@ def _predict_and_stitch(
     # passes (e.g. 21 for batch_size=4, 81 tiles). Expose a transient
     # per-tile bar so the caller sees forward progress within a frame
     # and can spot a hang vs a slow-but-progressing run.
+    tile_desc = f"tiles[shape={tile_shape},bs={batch_size}]"
     tile_iter = tqdm(
         loader,
         total=len(loader),
-        desc=f"  tiles[shape={tile_shape},bs={batch_size}]",
+        desc=f"  {tile_desc}",
         unit="batch",
         leave=False,
         dynamic_ncols=True,
         mininterval=0.5,
+        disable=not _SHOW_INNER_PROGRESS,
     )
+    t_tiles = time.perf_counter()
 
     with torch.no_grad():
         for tiles, coords in tile_iter:
@@ -345,6 +379,8 @@ def _predict_and_stitch(
                         dists[i] * w[None]
                     )
                     weight[zs : zs + tz, ys : ys + ty, xs : xs + tx] += w
+
+    _phase_status(tile_desc, len(loader), time.perf_counter() - t_tiles, "batches")
 
     mask = weight > 0
     prob_acc[mask] /= weight[mask]
@@ -571,15 +607,18 @@ def _polyhedra_to_label(
     ray_norms[ray_norms == 0] = 1.0
     ray_unit = (rays / ray_norms).astype(np.float32)  # (n_rays, 3)
 
+    paint_desc = f"paint kept[{len(kept_idx)}]"
     pbar = tqdm(
         enumerate(kept_idx, start=1),
         total=len(kept_idx),
-        desc=f"  paint kept[{len(kept_idx)}]",
+        desc=f"  {paint_desc}",
         unit="cell",
         leave=False,
         dynamic_ncols=True,
         mininterval=0.5,
+        disable=not _SHOW_INNER_PROGRESS,
     )
+    t_paint = time.perf_counter()
     for label_value, peak_idx in pbar:
         if label_value >= np.iinfo(label_img.dtype).max:
             break
@@ -631,6 +670,7 @@ def _polyhedra_to_label(
         paint = mask & (region == 0)
         region[paint] = int(label_value)
 
+    _phase_status(paint_desc, len(kept_idx), time.perf_counter() - t_paint, "cells")
     return label_img
 
 
@@ -695,15 +735,18 @@ def _bbox_nms_kdtree(
     # ``query_radius`` is conservative: r_i + r_max bounds every
     # possible bounding-sphere overlap. False positives are rejected
     # by the bbox-IoU check below.
+    nms_desc = f"nms_kdtree[N={N}]"
     pbar = tqdm(
         range(N),
         total=N,
-        desc=f"  nms_kdtree[N={N}]",
+        desc=f"  {nms_desc}",
         unit="peak",
         leave=False,
         dynamic_ncols=True,
         mininterval=0.5,
+        disable=not _SHOW_INNER_PROGRESS,
     )
+    t_nms = time.perf_counter()
     kept_count = 0
     for pos in pbar:
         i = order[pos]
@@ -735,6 +778,7 @@ def _bbox_nms_kdtree(
         if kept_count and (kept_count % 1000 == 0):
             pbar.set_postfix_str(f"kept={kept_count}")
 
+    _phase_status(nms_desc, N, time.perf_counter() - t_nms, "peaks")
     return order[~suppressed[order]]
 
 
