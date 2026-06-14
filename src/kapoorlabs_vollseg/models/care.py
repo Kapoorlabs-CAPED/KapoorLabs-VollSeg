@@ -124,7 +124,6 @@ class CAREDenoiser:
             )
 
         n = tuple(n_tiles) if n_tiles is not None else tuple(self.n_tiles)
-        tile_shape = compute_tile_shape(image.shape, n)
 
         # Percentile-normalise the WHOLE input once, before tiling.
         # Per-tile normalisation (the old behaviour) stretches pure-
@@ -140,6 +139,21 @@ class CAREDenoiser:
             lo = float(np.percentile(flat, pmin))
             hi = float(np.percentile(flat, pmax))
             image = (image - lo) / (hi - lo + 1e-8)
+
+        # Pad each spatial axis up to a multiple of ``2**depth`` and
+        # round the tile shape too — careamics' U-Net concatenates
+        # encoder skip features with decoder upsamples and crashes on
+        # odd spatial sizes. Same fix as ``UNetSegmenter.predict``.
+        multiple = self._required_multiple()
+        pre_pad_shape = image.shape
+        pad_widths = tuple((0, (-s) % multiple) for s in image.shape)
+        if any(after > 0 for _, after in pad_widths):
+            image = np.pad(image, pad_widths, mode="reflect")
+
+        raw_tile_shape = compute_tile_shape(image.shape, n)
+        tile_shape = tuple(
+            int(np.ceil(t / multiple)) * multiple for t in raw_tile_shape
+        )
 
         dataset = CarePredictionDataset(
             volume=image,
@@ -167,4 +181,16 @@ class CAREDenoiser:
         denoised = stitch_tiles(
             predictions, image.shape, overlap_fraction=self.tile_overlap
         )
+        if denoised.shape != pre_pad_shape:
+            denoised = denoised[tuple(slice(0, s) for s in pre_pad_shape)]
         return Result(denoised=denoised)
+
+    def _required_multiple(self) -> int:
+        """Smallest spatial-axis divisor required by the careamics U-Net
+        (``2**(#pool layers)``)."""
+        n_pools = sum(
+            1
+            for m in self.backbone.module.network.modules()
+            if type(m).__name__.startswith(("MaxPool", "MaxBlurPool"))
+        )
+        return 1 << max(n_pools, 0)

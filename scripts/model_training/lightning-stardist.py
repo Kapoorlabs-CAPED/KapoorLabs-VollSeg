@@ -39,16 +39,16 @@ def _build_rays(p):
 
 
 def _save_sidecars(rays: np.ndarray, log_path: Path, experiment: str, p) -> None:
-    """Persist rays + arch JSON next to the checkpoints so
-    ``StarDistSegmenter.from_folder`` can rebuild at inference time."""
-    rays_path = log_path / "rays.npy"
-    np.save(rays_path, rays)
-    np.save(log_path / f"{experiment}.rays.npy", rays)
+    """Persist arch JSON next to the checkpoints so
+    ``StarDistSegmenter.from_folder`` can rebuild at inference time.
 
+    Rays are intentionally NOT saved — they're a pure function of
+    ``(conv_dims, n_rays, anisotropy)`` and the loader regenerates them
+    deterministically from the JSON."""
     params = {
         "model_name": experiment,
-        "rays_file": rays_path.name,
         "n_rays": int(rays.shape[0]),
+        "anisotropy": list(p.anisotropy) if p.anisotropy else None,
         "conv_dims": p.conv_dims,
         "in_channels": p.in_channels,
         "unet_depth": p.unet_depth,

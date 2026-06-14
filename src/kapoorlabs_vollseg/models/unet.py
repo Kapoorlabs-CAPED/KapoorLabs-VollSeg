@@ -160,7 +160,6 @@ class UNetSegmenter:
             image = np.amax(image, axis=0)
 
         n = self._resolve_n_tiles(n_tiles, image.ndim)
-        tile_shape = compute_tile_shape(image.shape, n)
 
         # Percentile-normalise the WHOLE input once, before tiling.
         # Per-tile normalisation (the old behaviour) stretches pure-
@@ -177,6 +176,24 @@ class UNetSegmenter:
             lo = float(np.percentile(flat, pmin))
             hi = float(np.percentile(flat, pmax))
             image = (image - lo) / (hi - lo + 1e-8)
+
+        # careamics' U-Net halves each spatial axis at every pool and
+        # then ``torch.cat([upsample, skip])``s — sizes diverge unless
+        # the input is a multiple of ``2**depth``. Pad both the whole
+        # volume AND each tile up to that multiple, predict, then crop
+        # back to ``pre_pad_shape`` before stitching.
+        multiple = self._required_multiple()
+        pre_pad_shape = image.shape
+        pad_widths = tuple((0, (-s) % multiple) for s in image.shape)
+        if any(after > 0 for _, after in pad_widths):
+            image = np.pad(image, pad_widths, mode="reflect")
+
+        # Compute the tile shape on the padded image and round each
+        # axis up to the same ``multiple`` so per-tile sizes also pass.
+        raw_tile_shape = compute_tile_shape(image.shape, n)
+        tile_shape = tuple(
+            int(np.ceil(t / multiple)) * multiple for t in raw_tile_shape
+        )
 
         dataset = CarePredictionDataset(
             volume=image,
@@ -206,6 +223,9 @@ class UNetSegmenter:
         prob = stitch_tiles(
             predictions, image.shape, overlap_fraction=self.tile_overlap
         )
+        # Crop the stitched probability map back to the unpadded shape.
+        if prob.shape != pre_pad_shape:
+            prob = prob[tuple(slice(0, s) for s in pre_pad_shape)]
 
         try:
             thresholds = threshold_multiotsu(prob, classes=2)
@@ -233,6 +253,25 @@ class UNetSegmenter:
             prob = np.broadcast_to(prob, original_shape).copy()
 
         return Result(labels=labels, semantic=binary, probability=prob)
+
+    def _required_multiple(self) -> int:
+        """Return ``2**depth`` for the loaded careamics U-Net.
+
+        Each encoder block ends in a 2×-downsampling pool (either
+        ``MaxPool{2,3}d`` or careamics' functional ``MaxBlurPool``
+        wrapper). The matching decoder block ``torch.cat``s the upsample
+        with the encoder skip, which only matches when the input spatial
+        dim was divisible by ``2**(#pools)``. We count any module whose
+        class name starts with ``MaxPool`` / ``MaxBlurPool`` so both
+        downsampling variants are covered without threading ``depth``
+        through every singleton constructor.
+        """
+        n_pools = sum(
+            1
+            for m in self.backbone.module.network.modules()
+            if type(m).__name__.startswith(("MaxPool", "MaxBlurPool"))
+        )
+        return 1 << max(n_pools, 0)
 
     def _resolve_n_tiles(
         self,

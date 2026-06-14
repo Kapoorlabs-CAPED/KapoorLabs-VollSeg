@@ -94,15 +94,37 @@ def find_checkpoint(folder: Union[str, Path]) -> Path:
     return ckpts[0]
 
 
-def find_rays(folder: Union[str, Path]) -> Optional[Path]:
-    """Return ``rays.npy`` (or any ``*rays*.npy``) in ``folder``, or ``None``."""
+def read_rays_params(folder: Union[str, Path]) -> dict[str, Any]:
+    """Return ``{conv_dims, n_rays, anisotropy}`` from the model JSON.
+
+    Rays are a pure function of ``(conv_dims, n_rays, anisotropy)`` —
+    :func:`kapoorlabs_vollseg.stardist.rays.rays_2d` /
+    :func:`rays_3d_golden_spiral` regenerate them deterministically, so
+    we don't cache a ``rays.npy`` sidecar; the loader rebuilds at
+    inference time from the same numbers the training run used.
+
+    Missing keys are omitted (caller picks defaults).
+    """
     folder = Path(folder)
-    direct = folder / "rays.npy"
-    if direct.is_file():
-        return direct
-    for p in folder.glob("*rays*.npy"):
-        return p
-    return None
+
+    train_path = folder / "training_config.json"
+    if train_path.is_file():
+        with train_path.open() as fh:
+            params = json.load(fh).get("parameters", {})
+    else:
+        candidates = [
+            p for p in folder.glob("*.json") if p.name != "training_config.json"
+        ]
+        if not candidates:
+            return {}
+        with candidates[0].open() as fh:
+            params = json.load(fh)
+
+    out: dict[str, Any] = {}
+    for key in ("conv_dims", "n_rays", "anisotropy"):
+        if key in params:
+            out[key] = params[key]
+    return out
 
 
 _THRESHOLD_FIELDS = ("prob_thresh", "nms_thresh")

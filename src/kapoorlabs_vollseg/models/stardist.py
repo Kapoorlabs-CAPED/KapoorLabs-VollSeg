@@ -17,13 +17,13 @@ import torch
 
 from .._backbones._config import (
     find_checkpoint,
-    find_rays,
+    read_rays_params,
     read_training_config,
 )
 from .._backbones.stardist import StarDistBackbone
 from ..pipelines.base import Result
 from ..stardist.inference import _predict_and_stitch, predict_volume
-from ..stardist.rays import rays_3d_golden_spiral
+from ..stardist.rays import rays_2d, rays_3d_golden_spiral
 
 
 class StarDistSegmenter:
@@ -102,22 +102,26 @@ class StarDistSegmenter:
         n_rays: int = 96,
         **kwargs,
     ) -> StarDistSegmenter:
-        """Build from a folder holding the ``.ckpt``, optional ``rays.npy``,
-        and ``training_config.json`` (or fallback JSON). When ``rays`` is
-        not passed, the loader looks for ``rays.npy`` / ``*rays*.npy`` in
-        the folder; if neither exists it generates a fresh golden-spiral
-        set of length ``n_rays``."""
+        """Build from a folder holding the ``.ckpt`` and
+        ``training_config.json`` (or fallback JSON). When ``rays`` is
+        not passed, they're regenerated deterministically from
+        ``(conv_dims, n_rays, anisotropy)`` read out of the JSON via
+        :func:`read_rays_params`; missing keys fall back to
+        ``conv_dims=3``, ``n_rays=96``, ``anisotropy=None``."""
         ckpt = find_checkpoint(folder)
         arch = read_training_config(folder)
         arch.update(kwargs)
 
         if rays is None:
-            rays_path = find_rays(folder)
-            rays = (
-                np.load(rays_path)
-                if rays_path is not None
-                else rays_3d_golden_spiral(n_rays)
-            )
+            rays_cfg = read_rays_params(folder)
+            n = int(rays_cfg.get("n_rays", n_rays))
+            conv_dims = int(rays_cfg.get("conv_dims", arch.get("conv_dims", 3)))
+            if conv_dims == 2:
+                rays = rays_2d(n)
+            else:
+                aniso = rays_cfg.get("anisotropy")
+                aniso = tuple(aniso) if aniso else None
+                rays = rays_3d_golden_spiral(n, anisotropy=aniso)
         return cls.from_checkpoint(ckpt, rays=rays, **arch)
 
     def predict(
