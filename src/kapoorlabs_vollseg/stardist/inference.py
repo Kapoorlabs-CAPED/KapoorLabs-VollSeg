@@ -54,18 +54,14 @@ _SHOW_INNER_PROGRESS = os.environ.get("KAPOORLABS_VOLLSEG_PROGRESS") == "1"
 
 
 def _phase_status(desc: str, n_items: int, elapsed: float, unit: str) -> None:
-    """Emit a one-line "phase done" status when the live tqdm inside
-    that phase is disabled. With bars off (the default), this is what
-    you see per phase; with bars on, the tqdm output self-erases via
-    ``leave=False`` and this print would just be redundant.
+    """Per-phase "done in N seconds" line. **Silent by default** —
+    the outer ``predict_timelapse`` progress bar already shows the
+    user how much time is left per model, so re-emitting one line
+    per tile / NMS / paint phase × every frame just floods the log.
+    Set ``KAPOORLABS_VOLLSEG_PROGRESS=1`` to surface them again when
+    you want the inner-loop visibility back.
     """
-    if _SHOW_INNER_PROGRESS:
-        return
-    rate = n_items / elapsed if elapsed > 0 else 0.0
-    print(
-        f"  {desc} — {n_items} {unit} in {elapsed:.1f}s " f"({rate:.1f} {unit}/s)",
-        flush=True,
-    )
+    return
 
 
 # ============================================================== top-level API

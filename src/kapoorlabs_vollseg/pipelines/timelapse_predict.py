@@ -58,19 +58,64 @@ class TimelapsePredictor(LightningModule):
     Adds a Lightning-style ``predict_step`` to every pipeline in the
     codebase by composition — singletons and composites become DDP-
     distributable at the timepoint level without any per-class changes.
+
+    Owns a single ``tqdm`` progress bar that ticks once per frame and
+    shows ``elapsed<ETA`` — gives the caller a per-model
+    "how-much-time-is-left" view without flooding the log with per-tile
+    / per-NMS / per-paint lines. The phase prints inside ``inference.py``
+    are silenced by default; opt back in with
+    ``KAPOORLABS_VOLLSEG_PROGRESS=1``.
     """
 
-    def __init__(self, pipeline: Pipeline, predict_kwargs: Optional[dict] = None):
+    def __init__(
+        self,
+        pipeline: Pipeline,
+        predict_kwargs: Optional[dict] = None,
+        total_frames: Optional[int] = None,
+        bar_desc: str = "frames",
+    ):
         super().__init__()
         # Stored as an attribute, NOT a submodule — pipeline isn't an nn.Module.
         self.pipeline = pipeline
         self.predict_kwargs = dict(predict_kwargs or {})
+        self._total_frames = total_frames
+        self._bar_desc = bar_desc
+        self._pbar = None
+
+    def _ensure_bar(self):
+        if self._pbar is not None:
+            return
+        from tqdm import tqdm
+
+        # Compact bar format that shows ELAPSED < ETA on the right and
+        # the count + per-frame rate. ``miniters=1`` + ``mininterval=0``
+        # forces a tick every frame even in environments where tqdm
+        # would otherwise throttle updates; ``ncols=90`` caps the line
+        # width so it doesn't grab the whole terminal.
+        self._pbar = tqdm(
+            total=self._total_frames,
+            desc=self._bar_desc,
+            unit="frame",
+            bar_format="{desc}: {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]",
+            leave=False,
+            dynamic_ncols=False,
+            ncols=90,
+            miniters=1,
+            mininterval=0.0,
+        )
 
     def predict_step(self, batch, batch_idx, dataloader_idx: int = 0):
         frame, t_idx = batch
         if isinstance(frame, torch.Tensor):
             frame = frame.cpu().numpy()
         result = self.pipeline.predict(frame, **self.predict_kwargs)
+        self._ensure_bar()
+        self._pbar.update(1)
+        # Close on the last frame so the bar is gone before the caller's
+        # next print (model summary, scoring line, etc).
+        if self._total_frames is not None and self._pbar.n >= self._total_frames:
+            self._pbar.close()
+            self._pbar = None
         return {
             "t": int(t_idx),
             "labels": result.labels,
@@ -90,6 +135,7 @@ def predict_timelapse(
     strategy: str = "auto",
     enable_progress_bar: bool = True,
     num_workers=0,
+    bar_desc: str = "frames",
     **predict_kwargs,
 ) -> dict[str, Optional[np.ndarray]]:
     """Run ``pipeline.predict(...)`` over every timepoint of ``volume``.
@@ -120,7 +166,12 @@ def predict_timelapse(
         ``labels`` / ``semantic`` / ``roi`` / ``denoised`` / ``probability``.
         Missing fields are absent from the dict (not None-stuffed).
     """
-    predictor = TimelapsePredictor(pipeline, predict_kwargs)
+    predictor = TimelapsePredictor(
+        pipeline,
+        predict_kwargs,
+        total_frames=int(volume.shape[0]),
+        bar_desc=bar_desc,
+    )
     loader = DataLoader(
         _FrameDataset(volume),
         batch_size=1,

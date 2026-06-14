@@ -455,8 +455,10 @@ for i, model_dir in enumerate(model_dirs):
                     strategy=strategy,
                     # Lightning's rich progress bar suffers the same
                     # newline-spam issue under SLURM as our tqdm bars;
-                    # gate on the same TTY check.
+                    # gate on the env var. Our own ``bar_desc`` bar
+                    # below is the single per-model progress line.
                     enable_progress_bar=_INTERACTIVE,
+                    bar_desc=f"[{i + 1}/{len(model_dirs)}] {tags['experiment']}",
                     prob_thresh=prob_thresh,
                     nms_thresh=nms_thresh,
                     n_tiles=n_tiles,
