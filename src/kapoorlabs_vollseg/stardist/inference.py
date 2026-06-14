@@ -23,7 +23,6 @@ for very few rays a multi-ray interpolation would be more accurate.
 from __future__ import annotations
 
 import os
-import sys
 import time
 from dataclasses import dataclass
 from typing import Optional
@@ -41,29 +40,30 @@ from .lightning_module import StarDistModule
 
 
 # Whether the inner ``tqdm`` bars (per-tile, per-NMS-peak, per-painted
-# polyhedron) should actually render. In an interactive terminal they
-# carriage-return in place and erase on completion (``leave=False``)
-# so each phase replaces the previous one; in a non-TTY context (SLURM
-# log, ``tee``, ``nohup`` redirect) tqdm prints newlines instead so
-# the per-frame work spams thousands of lines. Default to *disabled*
-# when stderr isn't a TTY; opt back in with
-# ``KAPOORLABS_VOLLSEG_PROGRESS=1`` if you really want all the bars.
-_SHOW_INNER_PROGRESS = (
-    sys.stderr.isatty() or os.environ.get("KAPOORLABS_VOLLSEG_PROGRESS") == "1"
-)
+# polyhedron) should render at all. In a "perfect" terminal they
+# carriage-return in place and erase on completion (``leave=False``);
+# in any environment where ``\r`` doesn't fully erase the prior line
+# (SLURM log, ``tee``, certain SSH terminals, ``screen`` with logging,
+# CI runners) tqdm writes a fresh line per update and the per-frame
+# work spams hundreds of lines. We've been burned often enough by
+# false-positive TTY detection that the bars are **off by default**;
+# the ``_phase_status`` print below gives the same "done in N seconds"
+# information without the spam. Opt the bars back in explicitly with
+# ``KAPOORLABS_VOLLSEG_PROGRESS=1``.
+_SHOW_INNER_PROGRESS = os.environ.get("KAPOORLABS_VOLLSEG_PROGRESS") == "1"
 
 
 def _phase_status(desc: str, n_items: int, elapsed: float, unit: str) -> None:
-    """One-liner that emits "phase done" status when the live tqdm
-    inside that phase is disabled (non-TTY). In a TTY the bar already
-    self-erases via ``leave=False`` so this print would be redundant
-    chatter — gate accordingly.
+    """Emit a one-line "phase done" status when the live tqdm inside
+    that phase is disabled. With bars off (the default), this is what
+    you see per phase; with bars on, the tqdm output self-erases via
+    ``leave=False`` and this print would just be redundant.
     """
     if _SHOW_INNER_PROGRESS:
         return
     rate = n_items / elapsed if elapsed > 0 else 0.0
     print(
-        f"  {desc} done — {n_items} {unit} in {elapsed:.1f}s " f"({rate:.1f} {unit}/s)",
+        f"  {desc} — {n_items} {unit} in {elapsed:.1f}s " f"({rate:.1f} {unit}/s)",
         flush=True,
     )
 

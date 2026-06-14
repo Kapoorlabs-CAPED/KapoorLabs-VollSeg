@@ -33,7 +33,6 @@ import functools
 import gc
 import json
 import os
-import sys
 import time
 from pathlib import Path
 
@@ -47,15 +46,15 @@ from kapoorlabs_vollseg import StarDistSegmenter, predict_timelapse
 from kapoorlabs_vollseg._backbones._config import read_thresholds
 from kapoorlabs_vollseg.eval import matching_dataset
 
-# Same TTY gate as kapoorlabs_vollseg.stardist.inference uses for its
-# internal tqdm bars. When the script's stderr isn't a terminal (SLURM
-# log, ``tee``, ``nohup``) tqdm writes a new line per update and the
-# nested per-tile / per-NMS-peak / per-cell bars from one frame can
-# spam thousands of lines. Set ``KAPOORLABS_VOLLSEG_PROGRESS=1`` to
-# force the bars on even in a non-TTY context.
-_INTERACTIVE = (
-    sys.stderr.isatty() or os.environ.get("KAPOORLABS_VOLLSEG_PROGRESS") == "1"
-)
+# Same opt-in gate as kapoorlabs_vollseg.stardist.inference uses. We
+# tried letting ``sys.stderr.isatty()`` decide but it false-positives
+# on SSH / ``screen`` / ``tee`` / SLURM-with-pty setups where ``\r``
+# doesn't fully erase the prior line — tqdm then writes a fresh line
+# per update and the nested per-tile / per-NMS-peak / per-cell bars
+# from one frame spam hundreds of lines. The phase-done prints in
+# inference.py give the same timing info without the spam. Set
+# ``KAPOORLABS_VOLLSEG_PROGRESS=1`` to opt the bars back in.
+_INTERACTIVE = os.environ.get("KAPOORLABS_VOLLSEG_PROGRESS") == "1"
 
 
 def _is_rank_zero() -> bool:
@@ -108,6 +107,28 @@ skip_name_substrings = ("lr1p0ep1", "_sgd_")
 # back to the full T-axis. Reduces a sweep from N×T frames down to
 # N×min(15, T) so we can rank 14 models by IoU in tractable time.
 subset_n_each = 5
+
+# Where the per-model prediction TIFFs land. Lives next to the input
+# data (not inside each sweep folder) so all model predictions sit
+# together, one folder per model, easy to browse alongside the input.
+# Layout::
+#
+#     <input_dir>/
+#     ├── timelapse_fifth_dataset.tif                                    ← input
+#     └── predictions/
+#         ├── stardist_sweep_adam_lr1p0e-2_noscheduler/
+#         │   ├── timelapse_fifth_dataset.tif                            ← prediction
+#         │   └── timelapse_fifth_dataset.keras_indices.json             ← sidecar
+#         ├── stardist_sweep_lars_lr1p0ep0_noscheduler/
+#         │   └── …
+#         └── …
+predictions_root = input_dir / "predictions"
+
+# Wipe every per-model prediction TIFF + sidecar before predicting, so
+# a sweep that uses an updated model arch / threshold / config doesn't
+# silently re-use stale cached predictions. Set ``False`` to honour
+# existing caches.
+force_repredict = False
 
 # Multi-GPU sweep prediction knobs. ``predict_timelapse`` shards the
 # T axis across DDP ranks via Lightning's ``DistributedSampler`` — each
@@ -367,9 +388,16 @@ for i, model_dir in enumerate(model_dirs):
     )
     # Separate dir from full-volume predictions so an existing
     # ``predictions/<name>.tif`` from an earlier run can't shadow the
-    # subset prediction we want to score here.
-    pred_dir = model_dir / "predictions_subset"
-    pred_dir.mkdir(exist_ok=True)
+    # Predictions live next to the input data, under
+    # ``<input_dir>/predictions/<model_name>/<input.tif>`` — see
+    # ``predictions_root`` at the top of the script. One folder per
+    # model so they're easy to browse / clean.
+    pred_dir = predictions_root / model_dir.name
+    pred_dir.mkdir(parents=True, exist_ok=True)
+    if force_repredict:
+        for stale in pred_dir.iterdir():
+            stale.unlink()
+        print(f"   force_repredict=True — cleared {pred_dir}")
 
     try:
         star = StarDistSegmenter.from_folder(model_dir, batch_size=predict_batch_size)
