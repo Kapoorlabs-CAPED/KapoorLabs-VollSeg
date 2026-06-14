@@ -186,11 +186,17 @@ class CAREDenoiser:
         return Result(denoised=denoised)
 
     def _required_multiple(self) -> int:
-        """Smallest spatial-axis divisor required by the careamics U-Net
-        (``2**(#pool layers)``)."""
-        n_pools = sum(
-            1
-            for m in self.backbone.module.network.modules()
-            if type(m).__name__.startswith(("MaxPool", "MaxBlurPool"))
-        )
-        return 1 << max(n_pools, 0)
+        """Return ``2**depth`` for the loaded careamics U-Net.
+
+        ``self.pooling`` is a single instance reused across all encoder
+        levels, so PyTorch's ``modules()`` dedupes it down to one — we
+        count ``Conv_Block`` modules in the encoder ``ModuleList``
+        instead, which gives the real depth.
+        """
+        encoder = getattr(self.backbone.module.network, "encoder", None)
+        encoder_blocks = getattr(encoder, "encoder_blocks", None)
+        if encoder_blocks is not None:
+            depth = sum(1 for m in encoder_blocks if type(m).__name__ == "Conv_Block")
+        else:
+            depth = 0
+        return 1 << max(depth, 0)

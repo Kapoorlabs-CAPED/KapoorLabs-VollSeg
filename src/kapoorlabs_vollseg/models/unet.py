@@ -257,21 +257,21 @@ class UNetSegmenter:
     def _required_multiple(self) -> int:
         """Return ``2**depth`` for the loaded careamics U-Net.
 
-        Each encoder block ends in a 2×-downsampling pool (either
-        ``MaxPool{2,3}d`` or careamics' functional ``MaxBlurPool``
-        wrapper). The matching decoder block ``torch.cat``s the upsample
-        with the encoder skip, which only matches when the input spatial
-        dim was divisible by ``2**(#pools)``. We count any module whose
-        class name starts with ``MaxPool`` / ``MaxBlurPool`` so both
-        downsampling variants are covered without threading ``depth``
-        through every singleton constructor.
+        careamics builds the encoder as ``[Conv_Block, pool] * depth``
+        but reuses ONE ``self.pooling`` instance across all levels, so
+        ``network.modules()`` only sees that instance once (PyTorch
+        dedupes by identity). Counting ``Conv_Block`` modules in the
+        encoder ``ModuleList`` instead gives the real depth: the encoder
+        has ``depth`` ``Conv_Block``s, and each level halves every
+        spatial axis, so the input must be a multiple of ``2**depth``.
         """
-        n_pools = sum(
-            1
-            for m in self.backbone.module.network.modules()
-            if type(m).__name__.startswith(("MaxPool", "MaxBlurPool"))
-        )
-        return 1 << max(n_pools, 0)
+        encoder = getattr(self.backbone.module.network, "encoder", None)
+        encoder_blocks = getattr(encoder, "encoder_blocks", None)
+        if encoder_blocks is not None:
+            depth = sum(1 for m in encoder_blocks if type(m).__name__ == "Conv_Block")
+        else:
+            depth = 0
+        return 1 << max(depth, 0)
 
     def _resolve_n_tiles(
         self,
