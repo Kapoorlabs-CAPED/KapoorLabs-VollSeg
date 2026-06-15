@@ -105,79 +105,118 @@ def main(config: CarePredictScenario):
         out_path = output_dir / basename
 
         if vol.ndim == 4:
-            out = predict_timelapse(
-                care,
-                vol,
-                devices=p.devices,
-                accelerator=p.accelerator,
-                strategy=p.strategy,
-                enable_progress_bar=True,
-                n_tiles=n_tiles,
-            )
-            if not out:
-                continue
-            denoised = out["denoised"]
+            # Stream each predicted frame to disk inside ``predict_step``
+            # via the ``frame_writer`` callback — nothing timelapse-sized
+            # accumulates in Python. Each ``TiffWriter.write`` holds at
+            # most one float32 frame in memory; the prior path peaked at
+            # ~88 GB during the internal ``np.stack`` of the 192 frames.
+            denoised_shape = (vol.shape[0],) + tuple(vol.shape[1:])
+            tw = TiffWriter(out_path, bigtiff=True)
+
+            def _write_frame(t_idx: int, frame_result: dict, _tw=tw):
+                arr = frame_result.get("denoised")
+                if arr is None:
+                    return
+                _tw.write(
+                    np.ascontiguousarray(arr, dtype=np.float32),
+                    contiguous=False,
+                )
+
+            try:
+                predict_timelapse(
+                    care,
+                    vol,
+                    devices=p.devices,
+                    accelerator=p.accelerator,
+                    strategy=p.strategy,
+                    enable_progress_bar=True,
+                    n_tiles=n_tiles,
+                    frame_writer=_write_frame,
+                )
+            finally:
+                tw.close()
+            del vol
+            gc.collect()
+            tqdm.write(f"  → {out_path}   shape={denoised_shape}")
+            denoised = None  # streaming sink: nothing in memory to score
         else:
             denoised = care.predict(vol, n_tiles=n_tiles).denoised
-
-        # The input volume can be tens of GB on disk and is no longer
-        # needed for the predict/write path — drop it before we allocate
-        # the uint16 output buffer. The OOM that ships ``Killed`` with
-        # no traceback after the Predicting bar completes is the kernel
-        # tipping over on the (input vol) + (float32 denoised stack) +
-        # (float32 clip copy) + (uint16 cast copy) pile.
-        del vol
-        gc.collect()
-
-        # Write the denoised stack as float32 — CARE's output is
-        # already normalised to roughly ``[0, 1]`` (training distribution),
-        # and any uint cast would either zero everything (clip to
-        # ``[0, 65535]``) or destroy the dynamic range (rescale before
-        # cast loses the original intensity scale). Streaming frame by
-        # frame with ``TiffWriter(..., bigtiff=True, contiguous=False)``
-        # keeps memory flat — no full-stack copies allocated.
-        denoised_shape = denoised.shape
-        if denoised.ndim == 4:
-            with TiffWriter(out_path, bigtiff=True) as tw:
-                for t in range(denoised.shape[0]):
-                    tw.write(
-                        np.ascontiguousarray(denoised[t], dtype=np.float32),
-                        contiguous=False,
-                    )
-        else:
+            del vol
+            gc.collect()
             imwrite(
                 out_path,
                 np.ascontiguousarray(denoised, dtype=np.float32),
             )
+            denoised_shape = denoised.shape
 
         if ref_dir is not None:
             ref_path = ref_dir / basename
             if not ref_path.is_file():
                 tqdm.write(f"  → {out_path}   (no ref {ref_path.name} — score skipped)")
-                del denoised
+                if denoised is not None:
+                    del denoised
                 gc.collect()
                 continue
-            ref_vol = imread(ref_path)
-            if ref_vol.shape != denoised_shape:
-                tqdm.write(
-                    f"  → {out_path}   (ref shape {ref_vol.shape} != "
-                    f"pred shape {denoised_shape} — score skipped)"
-                )
-                del denoised, ref_vol
-                gc.collect()
-                continue
-            s = _score(denoised, ref_vol)
-            s["file"] = basename
+            if denoised is None:
+                # 4D streaming path discarded the in-memory stack — read
+                # the written prediction back frame by frame and score
+                # without ever holding both stacks simultaneously.
+                from tifffile import TiffFile
+
+                with TiffFile(out_path) as pred_tf, TiffFile(ref_path) as ref_tf:
+                    pred_series = pred_tf.series[0]
+                    ref_series = ref_tf.series[0]
+                    if pred_series.shape != ref_series.shape:
+                        tqdm.write(
+                            f"  → {out_path}   (ref shape {ref_series.shape} != "
+                            f"pred shape {pred_series.shape} — score skipped)"
+                        )
+                        gc.collect()
+                        continue
+                    psnrs, ssims = [], []
+                    n_frames = (
+                        pred_series.shape[0] if len(pred_series.shape) == 4 else 1
+                    )
+                    for t in range(n_frames):
+                        pred_t = (
+                            pred_series.asarray(key=t)
+                            if n_frames > 1
+                            else pred_series.asarray()
+                        )
+                        ref_t = (
+                            ref_series.asarray(key=t)
+                            if n_frames > 1
+                            else ref_series.asarray()
+                        )
+                        s_t = _score(pred_t, ref_t)
+                        psnrs.append(s_t["psnr"])
+                        ssims.append(s_t["ssim"])
+                s = {
+                    "file": basename,
+                    "psnr": float(np.mean(psnrs)),
+                    "ssim": float(np.mean(ssims)),
+                }
+            else:
+                ref_vol = imread(ref_path)
+                if ref_vol.shape != denoised_shape:
+                    tqdm.write(
+                        f"  → {out_path}   (ref shape {ref_vol.shape} != "
+                        f"pred shape {denoised_shape} — score skipped)"
+                    )
+                    del denoised, ref_vol
+                    gc.collect()
+                    continue
+                s = _score(denoised, ref_vol)
+                s["file"] = basename
+                del ref_vol
             scores.append(s)
             tqdm.write(
                 f"  → {out_path}   PSNR={s['psnr']:.2f} dB  SSIM={s['ssim']:.4f}"
             )
-            del ref_vol
-        else:
-            tqdm.write(f"  → {out_path}   shape={denoised_shape}")
 
         # Final release before the next input file pulls a fresh volume.
-        del denoised
+        if denoised is not None:
+            del denoised
         gc.collect()
 
     if scores:

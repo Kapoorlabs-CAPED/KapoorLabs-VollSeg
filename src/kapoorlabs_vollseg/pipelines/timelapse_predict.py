@@ -18,7 +18,10 @@ populates).
 
 from __future__ import annotations
 
-from typing import Any, Optional
+import os
+import tempfile
+from pathlib import Path
+from typing import Any, Callable, Optional
 
 import numpy as np
 import torch
@@ -27,6 +30,9 @@ from lightning import LightningModule, Trainer
 from torch.utils.data import DataLoader, Dataset
 
 from .base import Pipeline
+
+
+_FIELDS = ("labels", "semantic", "roi", "denoised", "probability")
 
 
 class _FrameDataset(Dataset):
@@ -73,6 +79,8 @@ class TimelapsePredictor(LightningModule):
         predict_kwargs: Optional[dict] = None,
         total_frames: Optional[int] = None,
         bar_desc: str = "frames",
+        frame_writer: Optional[Callable[[int, dict], None]] = None,
+        spill_dir: Optional[os.PathLike] = None,
     ):
         super().__init__()
         # Stored as an attribute, NOT a submodule — pipeline isn't an nn.Module.
@@ -81,6 +89,14 @@ class TimelapsePredictor(LightningModule):
         self._total_frames = total_frames
         self._bar_desc = bar_desc
         self._pbar = None
+        self._frame_writer = frame_writer
+        # When neither a streaming ``frame_writer`` nor a spill dir is
+        # set, ``predict_step`` keeps frame arrays in the returned dict
+        # (legacy behaviour). With a spill dir, each frame is dumped to
+        # ``<spill_dir>/<t:06d>.npz`` and the returned dict carries
+        # only the timepoint index — the offload-and-stitch path
+        # described in :func:`predict_timelapse`.
+        self._spill_dir = Path(spill_dir) if spill_dir is not None else None
 
     def _ensure_bar(self):
         if self._pbar is not None:
@@ -120,6 +136,50 @@ class TimelapsePredictor(LightningModule):
             frame = frame.cpu().numpy()
         result = self.pipeline.predict(frame, **self.predict_kwargs)
 
+        self._ensure_bar()
+        self._pbar.update(1)
+        if self._total_frames is not None and self._pbar.n >= self._total_frames:
+            self._pbar.close()
+            self._pbar = None
+
+        # Streaming sink: the caller wrote the frame to disk via
+        # ``frame_writer``. Drop every array from the dict we return so
+        # Lightning's per-batch buffer + the downstream gather/stack
+        # don't hold onto ~250 MB × T worth of float32 — that's what
+        # OOM-killed the 192-frame timelapse before this path existed.
+        if self._frame_writer is not None:
+            self._frame_writer(
+                int(t_idx),
+                {
+                    "labels": result.labels,
+                    "semantic": result.semantic,
+                    "roi": result.roi,
+                    "denoised": result.denoised,
+                    "probability": result.probability,
+                },
+            )
+            return {"t": int(t_idx)}
+
+        # Offload-and-stitch path: spill this frame's arrays to disk so
+        # nothing timelapse-sized accumulates in Python's per-batch
+        # buffer. ``predict_timelapse`` stitches the per-T spill files
+        # back into stacked arrays on rank 0 after Lightning's predict
+        # loop returns.
+        if self._spill_dir is not None:
+            payload: dict[str, np.ndarray] = {}
+            if result.labels is not None:
+                payload["labels"] = np.asarray(result.labels)
+            if result.semantic is not None:
+                payload["semantic"] = np.asarray(result.semantic)
+            if result.roi is not None:
+                payload["roi"] = np.asarray(result.roi)
+            if result.denoised is not None:
+                payload["denoised"] = np.asarray(result.denoised)
+            if result.probability is not None:
+                payload["probability"] = np.asarray(result.probability)
+            np.savez(self._spill_dir / f"{int(t_idx):06d}.npz", **payload)
+            return {"t": int(t_idx)}
+
         return {
             "t": int(t_idx),
             "labels": result.labels,
@@ -140,6 +200,9 @@ def predict_timelapse(
     enable_progress_bar: bool = True,
     num_workers=0,
     bar_desc: str = "frames",
+    frame_writer: Optional[Callable[[int, dict], None]] = None,
+    offload_to_disk: bool = True,
+    spill_dir: Optional[os.PathLike] = None,
     **predict_kwargs,
 ) -> dict[str, Optional[np.ndarray]]:
     """Run ``pipeline.predict(...)`` over every timepoint of ``volume``.
@@ -159,6 +222,36 @@ def predict_timelapse(
         for multi-GPU T-sharding.
     enable_progress_bar
         Lightning's per-batch bar — set False if you have an outer tqdm.
+    frame_writer
+        Optional ``(t_idx, result_dict) -> None`` callback invoked from
+        inside ``predict_step`` immediately after the pipeline returns.
+        When set, each frame's arrays are handed to the writer and
+        dropped from the per-batch return value, so nothing
+        timelapse-sized accumulates in Python. The caller's writer is
+        responsible for streaming to disk (typically a single
+        ``TiffWriter`` opened around the call). The returned dict will
+        be empty — disk is the source of truth. Use this when you want
+        the prediction to flow straight to a final on-disk format
+        without ever materializing the stacked timelapse in RAM.
+    offload_to_disk
+        Default ``True``. When set (and ``frame_writer`` is ``None``),
+        each frame's arrays are spilled to ``spill_dir / <t:06d>.npz``
+        inside ``predict_step`` and the per-batch dict carries only
+        ``{"t": idx}``. After Lightning's predict loop returns, the
+        per-T spill files are stitched into ``np.stack``-style output
+        arrays. Memory peak drops from ~3× stack size (Python list +
+        ``np.stack`` copy + result) to ~1× stack size (only the
+        stitched output is held at once). Caller still gets the same
+        ``{"labels": (T, …), "denoised": (T, …)}`` shape it always
+        did. Set ``False`` to restore the legacy in-memory path —
+        useful for tiny T where the disk round-trip costs more than it
+        saves.
+    spill_dir
+        Optional directory used for the spill files. ``None`` (default)
+        creates a fresh ``TemporaryDirectory`` that's wiped at the end
+        of the call. Pass an explicit path if you want to inspect the
+        per-T arrays after the fact (e.g. for debugging a flaky
+        downstream stitch).
     **predict_kwargs
         Forwarded to every ``pipeline.predict(frame, **kwargs)`` call —
         e.g. ``prob_thresh`` / ``nms_thresh`` / ``n_tiles``.
@@ -166,15 +259,32 @@ def predict_timelapse(
     Returns
     -------
     dict
-        Fields that the pipeline populates, each stacked along T:
-        ``labels`` / ``semantic`` / ``roi`` / ``denoised`` / ``probability``.
-        Missing fields are absent from the dict (not None-stuffed).
+        Without ``frame_writer``: the fields the pipeline populates,
+        each stacked along T (``labels`` / ``semantic`` / ``roi`` /
+        ``denoised`` / ``probability``). Missing fields are absent.
+
+        With ``frame_writer``: empty dict — the writer was the only
+        consumer of the per-frame arrays.
     """
+    # Resolve spill directory: explicit path > tempdir > no offload.
+    spill_ctx: Optional[tempfile.TemporaryDirectory] = None
+    spill_path: Optional[Path] = None
+    use_offload = offload_to_disk and frame_writer is None
+    if use_offload:
+        if spill_dir is None:
+            spill_ctx = tempfile.TemporaryDirectory(prefix="vollseg_spill_")
+            spill_path = Path(spill_ctx.name)
+        else:
+            spill_path = Path(spill_dir)
+            spill_path.mkdir(parents=True, exist_ok=True)
+
     predictor = TimelapsePredictor(
         pipeline,
         predict_kwargs,
         total_frames=int(volume.shape[0]),
         bar_desc=bar_desc,
+        frame_writer=frame_writer,
+        spill_dir=spill_path,
     )
     loader = DataLoader(
         _FrameDataset(volume),
@@ -195,6 +305,13 @@ def predict_timelapse(
 
     # Other ranks in DDP get None back — let the caller short-circuit.
     if per_frame is None:
+        return {}
+
+    # Streaming sink path: ``predict_step`` already handed every frame's
+    # arrays to ``frame_writer``; the returned dicts hold only ``{"t":
+    # idx}``. Skip the gather / stack — there's nothing to stack and the
+    # caller is already done with disk-side writes.
+    if frame_writer is not None:
         return {}
 
     # Lightning returns a list-of-batch-outputs; each batch is one frame
@@ -236,7 +353,40 @@ def predict_timelapse(
     per_frame = sorted(unique, key=lambda d: int(d["t"]))
 
     out: dict[str, Optional[np.ndarray]] = {}
-    for key in ("labels", "semantic", "roi", "denoised", "probability"):
+    if use_offload:
+        # Stitch: each ``per_frame`` entry holds only its T index; the
+        # arrays live in ``<spill_path>/<t:06d>.npz``. Allocate one
+        # output buffer per field (sized to T × frame-shape) and copy
+        # each frame's array into the matching slot. Memory peak ≈ one
+        # output buffer + one read frame, instead of the prior
+        # ``list-of-T-arrays + np.stack`` pile.
+        if not per_frame:
+            if spill_ctx is not None:
+                spill_ctx.cleanup()
+            return out
+        first_npz = np.load(spill_path / f"{int(per_frame[0]['t']):06d}.npz")
+        field_specs: dict[str, tuple] = {
+            field: (first_npz[field].shape, first_npz[field].dtype)
+            for field in first_npz.files
+        }
+        first_npz.close()
+        T = len(per_frame)
+        for field, (frame_shape, frame_dtype) in field_specs.items():
+            out[field] = np.empty((T, *frame_shape), dtype=frame_dtype)
+        for i, d in enumerate(per_frame):
+            t = int(d["t"])
+            npz = np.load(spill_path / f"{t:06d}.npz")
+            for field in field_specs:
+                out[field][i] = npz[field]
+            npz.close()
+        if spill_ctx is not None:
+            spill_ctx.cleanup()
+        return out
+
+    # Legacy in-memory path: frames carry their arrays in ``per_frame``
+    # itself. Stacks twice the timelapse size (list + np.stack output)
+    # at peak — only safe when T × frame_size fits 2× in RAM.
+    for key in _FIELDS:
         chunks = [d[key] for d in per_frame if d.get(key) is not None]
         if chunks:
             out[key] = np.stack(chunks, axis=0)
