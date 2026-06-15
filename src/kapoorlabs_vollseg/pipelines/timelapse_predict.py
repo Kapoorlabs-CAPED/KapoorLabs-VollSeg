@@ -65,12 +65,10 @@ class TimelapsePredictor(LightningModule):
     codebase by composition — singletons and composites become DDP-
     distributable at the timepoint level without any per-class changes.
 
-    Owns a single ``tqdm`` progress bar that ticks once per frame and
-    shows ``elapsed<ETA`` — gives the caller a per-model
-    "how-much-time-is-left" view without flooding the log with per-tile
-    / per-NMS / per-paint lines. The phase prints inside ``inference.py``
-    are silenced by default; opt back in with
-    ``KAPOORLABS_VOLLSEG_PROGRESS=1``.
+    Progress is reported by Lightning's built-in progress bar only
+    (gate via ``Trainer(enable_progress_bar=...)``). The phase prints
+    inside ``inference.py`` are silenced by default; opt them back in
+    with ``KAPOORLABS_VOLLSEG_PROGRESS=1``.
     """
 
     def __init__(
@@ -86,9 +84,12 @@ class TimelapsePredictor(LightningModule):
         # Stored as an attribute, NOT a submodule — pipeline isn't an nn.Module.
         self.pipeline = pipeline
         self.predict_kwargs = dict(predict_kwargs or {})
+        # ``total_frames`` / ``bar_desc`` are kept on the signature for
+        # backward compatibility but are no longer consulted — there's
+        # no per-step tqdm bar anymore. Lightning's own progress bar is
+        # the only one shown.
         self._total_frames = total_frames
         self._bar_desc = bar_desc
-        self._pbar = None
         self._frame_writer = frame_writer
         # When neither a streaming ``frame_writer`` nor a spill dir is
         # set, ``predict_step`` keeps frame arrays in the returned dict
@@ -98,49 +99,11 @@ class TimelapsePredictor(LightningModule):
         # described in :func:`predict_timelapse`.
         self._spill_dir = Path(spill_dir) if spill_dir is not None else None
 
-    def _ensure_bar(self):
-        if self._pbar is not None:
-            return
-        from tqdm import tqdm
-
-        # Sexy single-line bar:
-        #   <desc> ▰▰▰▰▰▰▰▱▱▱▱▱▱▱▱  47% • 7/15 • 04:13<04:53 • 36.1s/it
-        # Unicode block chars build a filled / unfilled segment look that
-        # renders nicely even where ``\r`` doesn't fully erase, ANSI-256
-        # cyan for the filled portion. ``miniters=1`` + ``mininterval=0``
-        # forces a tick every frame.
-        bar_filled = "\033[36m▰\033[0m"
-        bar_empty = "\033[90m▱\033[0m"
-        fmt = (
-            "{desc} "
-            "{bar} "
-            "{percentage:3.0f}% • {n_fmt}/{total_fmt} "
-            "• {elapsed}<{remaining} • {rate_fmt}"
-        )
-        self._pbar = tqdm(
-            total=self._total_frames,
-            desc=self._bar_desc,
-            unit="it",
-            bar_format=fmt,
-            ascii=bar_filled + bar_empty,
-            leave=False,
-            dynamic_ncols=False,
-            ncols=110,
-            miniters=1,
-            mininterval=0.0,
-        )
-
     def predict_step(self, batch, batch_idx, dataloader_idx: int = 0):
         frame, t_idx = batch
         if isinstance(frame, torch.Tensor):
             frame = frame.cpu().numpy()
         result = self.pipeline.predict(frame, **self.predict_kwargs)
-
-        self._ensure_bar()
-        self._pbar.update(1)
-        if self._total_frames is not None and self._pbar.n >= self._total_frames:
-            self._pbar.close()
-            self._pbar = None
 
         # Streaming sink: the caller wrote the frame to disk via
         # ``frame_writer``. Drop every array from the dict we return so

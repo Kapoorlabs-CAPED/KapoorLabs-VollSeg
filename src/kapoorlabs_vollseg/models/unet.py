@@ -1,9 +1,9 @@
 """U-Net semantic segmentation singleton — first-class PyTorch implementation.
 
 Same tiled inference path as :class:`CAREDenoiser`; the difference is in
-post-processing — sigmoid → multi-Otsu → connected-components → size
-filter — to produce the ``Result.semantic`` / ``Result.labels``
-shape that the Layer 2 composites expect.
+post-processing — multi-Otsu → connected-components → size filter — to
+produce the ``Result.semantic`` / ``Result.labels`` shape that the
+Layer 2 composites expect.
 """
 
 from __future__ import annotations
@@ -41,9 +41,6 @@ class UNetSegmenter:
     morph_iterations
         Iterations of dilation-then-erosion (per Z-slice for 3D) used to
         close small holes. ``0`` disables.
-    sigmoid
-        Apply ``sigmoid`` to the network output before thresholding (the
-        loss-during-training was ``BCEWithLogits``, so logits come out).
     """
 
     def __init__(
@@ -59,7 +56,6 @@ class UNetSegmenter:
         device: Optional[str] = None,
         min_size: int = 10,
         morph_iterations: int = 0,
-        sigmoid: bool = True,
     ):
         self.backbone = backbone
         self.n_tiles = list(n_tiles) if n_tiles is not None else [1, 4, 4]
@@ -75,7 +71,6 @@ class UNetSegmenter:
         self.backbone.module.to(self.device)
         self.min_size = int(min_size)
         self.morph_iterations = int(morph_iterations)
-        self.sigmoid = bool(sigmoid)
 
     @classmethod
     def from_checkpoint(
@@ -216,8 +211,6 @@ class UNetSegmenter:
                 pred, coords_out = self.backbone.module.predict_step(
                     (tiles, coords), batch_idx=0
                 )
-                if self.sigmoid:
-                    pred = torch.sigmoid(pred)
                 predictions.append((pred, coords_out))
 
         prob = stitch_tiles(
