@@ -132,7 +132,7 @@ predictions_root = input_dir / "predictions_unet"
 # a sweep that uses an updated model arch / threshold / config doesn't
 # silently re-use stale cached predictions. Set ``False`` to honour
 # existing caches.
-force_repredict = False
+force_repredict = True
 
 # Multi-GPU sweep prediction knobs. ``predict_timelapse`` shards the
 # T axis across DDP ranks via Lightning's ``DistributedSampler`` — each

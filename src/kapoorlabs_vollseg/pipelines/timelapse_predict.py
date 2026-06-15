@@ -119,13 +119,7 @@ class TimelapsePredictor(LightningModule):
         if isinstance(frame, torch.Tensor):
             frame = frame.cpu().numpy()
         result = self.pipeline.predict(frame, **self.predict_kwargs)
-        self._ensure_bar()
-        self._pbar.update(1)
-        # Close on the last frame so the bar is gone before the caller's
-        # next print (model summary, scoring line, etc).
-        if self._total_frames is not None and self._pbar.n >= self._total_frames:
-            self._pbar.close()
-            self._pbar = None
+
         return {
             "t": int(t_idx),
             "labels": result.labels,
@@ -211,7 +205,15 @@ def predict_timelapse(
     # shard.
     per_frame = [d for d in per_frame if d is not None]
 
-    if dist.is_available() and dist.is_initialized():
+    # ``gather_object`` serialises the entire ``per_frame`` list into a
+    # byte tensor and ships it through the **current CUDA device**, which
+    # OOMs on any non-trivial timelapse (192 frames of (19, 1560, 1560)
+    # ≈ 70 GiB of pickle bytes). With a single rank there's nothing to
+    # gather, so skip it. With multiple ranks we still call it — the
+    # multi-rank-OOM fix is a separate piece of work (streaming each
+    # frame to a per-T scratch file in ``predict_step`` so the gather
+    # only ships file paths).
+    if dist.is_available() and dist.is_initialized() and dist.get_world_size() > 1:
         world_size = dist.get_world_size()
         rank = dist.get_rank()
         gather_list = [None] * world_size if rank == 0 else None
