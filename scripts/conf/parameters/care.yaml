@@ -47,6 +47,6 @@ spatial_flip_p: 0.5
 rotation_p: 0.5
 
 # Prediction parameters
-n_tiles: [1, 4, 4]
+n_tiles: [2, 8, 8]
 tile_overlap: 0.125
 file_type: '*.tif'
