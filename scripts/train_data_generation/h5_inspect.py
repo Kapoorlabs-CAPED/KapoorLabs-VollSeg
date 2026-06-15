@@ -33,7 +33,8 @@ def inspect_h5_file(dataset_path):
 def main():
 
     dataset_path = (
-        "/lustre/fsn1/projects/rech/jsy/uzj81mi/oneat_training/oneat_kapoorlabs.h5"
+        "/lustre/fsn1/projects/rech/jsy/uzj81mi/segmentation_training/"
+        "xenopus_segmentation.h5"
     )
 
     inspect_h5_file(dataset_path)
