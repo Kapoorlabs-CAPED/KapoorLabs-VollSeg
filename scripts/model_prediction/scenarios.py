@@ -35,6 +35,11 @@ class CarePredictParams(_MultiGPU):
     n_tiles: list[int] = None
     tile_overlap: float = 0.125
     batch_size: int = 4
+    # Optional clean-reference folder for PSNR / SSIM scoring. When set,
+    # the predict loop pairs each input basename with the same basename
+    # under ``ref_dir`` and prints PSNR + SSIM after writing the denoised
+    # TIFF. Skip scoring by leaving as ``None``.
+    ref_dir: Optional[str] = None
 
 
 @dataclass

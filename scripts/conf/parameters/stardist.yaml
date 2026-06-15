@@ -2,6 +2,12 @@ file_type: "*.tif"
 n_tiles: [1, 4, 4]
 tile_overlap: 0.125
 batch_size: 4
+n_rays: 96              # used only if rays.npy is missing in log_path
+# Sensible defaults; overridden by training_config.json["parameters"]
+# when the trained model folder ships its own (e.g. from a future
+# optimize_thresholds step).
+prob_thresh: 0.4
+nms_thresh: 0.3
 
 # Multi-GPU: ``devices=-1`` picks up every GPU SLURM / CUDA_VISIBLE_DEVICES
 # exposes; ``strategy=ddp`` shards the T axis of a 4D input across those
@@ -10,8 +16,3 @@ batch_size: 4
 devices: -1
 accelerator: "auto"
 strategy: "ddp"
-
-# Optional clean-reference folder for PSNR / SSIM scoring (same
-# basenames as the inputs under ``experiment_data_paths.input_dir``).
-# Leave ``null`` to skip per-file scoring.
-ref_dir: null

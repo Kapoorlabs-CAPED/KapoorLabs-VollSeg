@@ -1,33 +1,102 @@
-"""One-shot helper: upload the freshly-trained PyTorch StarDist / U-Net
-folders to public HuggingFace model repos under the ``KapoorLabs`` org.
+"""One-shot helper: upload the freshly-trained PyTorch StarDist / U-Net /
+CARE folders to public HuggingFace model repos under the ``KapoorLabs``
+org.
 
 Sibling of :mod:`scripts/legacy_segmentation_workflow/_upload_models_to_hf.py`
 (which migrated the legacy keras Xenopus zoo); this one targets the
 new PyTorch-Lightning checkpoints written by ``StarDistTrainer`` /
-``UNetTrainer`` (flat layout: ``last.ckpt`` + ``rays.npy`` +
-``training_config.json`` next to each other).
+``UNetTrainer`` / ``CARETrainer`` (flat layout: ``last.ckpt`` +
+``training_config.json`` next to each other; StarDist rays are
+regenerated from the JSON at load time, no ``rays.npy`` sidecar).
 
-Usage::
+Usage
+=====
 
-    # 1. Put the HF token in a .env file next to this script:
-    #    HF_TOKEN=hf_xxx...
+Step 0 — put the HF token in a .env file next to this script:
 
-    # Standard layout — folders named after the MODELS keys live
-    # directly under --source-root:
-    python scripts/upload_pytorch_models_to_hf.py \\
-        --source-root /home/debian/jean-zay [--dry-run]
+    echo 'HF_TOKEN=hf_xxx...' > scripts/.env
 
-    # Replace an existing HF model with the best of a sweep — point
-    # --source-folder at the winning sweep directory and --only at
-    # the repo you want to overwrite. Use --replace to first wipe the
-    # remote repo so stale per-epoch checkpoints from the previous
-    # upload don't linger:
-    python scripts/upload_pytorch_models_to_hf.py \\
-        --source-folder /home/debian/jean-zay/models_unet_pytorch_sweep/unet_sweep_adam_lr1p0e-3_noscheduler \\
-        --only models_unet_pytorch \\
-        --replace
+All one-liners below assume you ``cd`` into the repo root first. Append
+``--dry-run`` to any of them to print exactly what would happen without
+touching HF. ``--replace`` wipes the remote repo in the same commit as
+the new upload so stale per-epoch checkpoints from a prior upload don't
+linger; omit it for a first-time upload.
 
-Mapping is held in :data:`MODELS` — extend it when you train more.
+────────────────────────────────────────────────────────────────────────
+StarDist (``models_stardist_pytorch`` → ``KapoorLabs/xenopus-stardist-pytorch``)
+────────────────────────────────────────────────────────────────────────
+
+First-time upload (folder named after the MODELS key under --source-root):
+
+    python scripts/upload_pytorch_models_to_hf.py --source-root /home/debian/jean-zay --only models_stardist_pytorch
+
+Replace existing remote with the same standard-layout folder:
+
+    python scripts/upload_pytorch_models_to_hf.py --source-root /home/debian/jean-zay --only models_stardist_pytorch --replace
+
+Replace existing remote with the winner of a sweep (non-standard folder
+name) — use --source-folder and exactly one --only target:
+
+    python scripts/upload_pytorch_models_to_hf.py --source-folder /home/debian/jean-zay/models_stardist_pytorch_sweep/stardist_sweep_adam_lr1p0e-3_cosine --only models_stardist_pytorch --replace
+
+────────────────────────────────────────────────────────────────────────
+U-Net (``models_unet_pytorch`` → ``KapoorLabs/xenopus-unet-pytorch``)
+────────────────────────────────────────────────────────────────────────
+
+First-time upload:
+
+    python scripts/upload_pytorch_models_to_hf.py --source-root /home/debian/jean-zay --only models_unet_pytorch
+
+Replace existing remote with the same standard-layout folder:
+
+    python scripts/upload_pytorch_models_to_hf.py --source-root /home/debian/jean-zay --only models_unet_pytorch --replace
+
+Replace existing remote with the winner of a sweep:
+
+    python scripts/upload_pytorch_models_to_hf.py --source-folder /home/debian/jean-zay/models_unet_pytorch_sweep/unet_sweep_adam_lr1p0e-3_noscheduler --only models_unet_pytorch --replace
+
+────────────────────────────────────────────────────────────────────────
+CARE (``models_care_pytorch`` → ``KapoorLabs/xenopus-edge-pytorch``)
+────────────────────────────────────────────────────────────────────────
+
+First-time upload:
+
+    python scripts/upload_pytorch_models_to_hf.py --source-root /home/debian/jean-zay --only models_edge_pytorch
+
+Replace existing remote with the same standard-layout folder:
+
+    python scripts/upload_pytorch_models_to_hf.py --source-root /home/debian/jean-zay --only models_edge_pytorch --replace
+
+Replace existing remote with a specific checkpoint folder (CARE has no
+sweep — single trained model — but the --source-folder form still works
+
+
+────────────────────────────────────────────────────────────────────────
+Batch (multiple models in one invocation)
+────────────────────────────────────────────────────────────────────────
+
+First-time upload of ALL models in :data:`MODELS`:
+
+    python scripts/upload_pytorch_models_to_hf.py --source-root /home/debian/jean-zay
+
+First-time upload of TWO specific models:
+
+    python scripts/upload_pytorch_models_to_hf.py --source-root /home/debian/jean-zay --only models_stardist_pytorch models_unet_pytorch
+
+Replace ALL models from the standard layout:
+
+    python scripts/upload_pytorch_models_to_hf.py --source-root /home/debian/jean-zay --replace
+
+Replace TWO specific models from the standard layout:
+
+    python scripts/upload_pytorch_models_to_hf.py --source-root /home/debian/jean-zay --only models_unet_pytorch models_edge_pytorch --replace
+
+────────────────────────────────────────────────────────────────────────
+Adding a new model kind
+────────────────────────────────────────────────────────────────────────
+
+Extend :data:`MODELS` (the ``{local_folder_name : huggingface_repo_id}``
+dict) — that's the single source of truth the CLI iterates over.
 """
 
 from __future__ import annotations
@@ -44,6 +113,7 @@ MODELS: dict[str, str] = {
     "models_unet_pytorch": "KapoorLabs/xenopus-unet-pytorch",
     "models_stardist_pytorch": "KapoorLabs/xenopus-stardist-pytorch",
     "models_maskunet_pytorch": "KapoorLabs/xenopus-maskunet-pytorch",
+    "models_edge_pytorch": "KapoorLabs/xenopus-edge-pytorch",
 }
 
 
@@ -69,7 +139,10 @@ PyTorch-Lightning checkpoint trained with ``kapoorlabs_vollseg``
 - ``training_config.json`` — Hydra parameters block, what
   ``kapoorlabs_vollseg`` reads first to rebuild the architecture
 - ``<model_name>.json`` — legacy ``CareInception`` fallback config
-- ``rays.npy`` (StarDist only) — the rays array used at training time
+
+StarDist rays are regenerated deterministically from
+``(conv_dims, n_rays, anisotropy)`` in the JSON; no ``rays.npy``
+sidecar is needed.
 
 ## Loading
 
@@ -87,6 +160,13 @@ folder = ensure_model("./local_models", "{folder_name}",
                       repo_id="{repo_id}")
 unet = UNetSegmenter.from_folder(folder)
 labels = unet.predict(volume).labels
+
+# CARE
+from kapoorlabs_vollseg import CAREDenoiser, ensure_model
+folder = ensure_model("./local_models", "{folder_name}",
+                      repo_id="{repo_id}")
+care = CAREDenoiser.from_folder(folder)
+denoised = care.predict(volume).denoised
 ```
 
 See https://github.com/Kapoorlabs-CAPED/KapoorLabs-VollSeg for the

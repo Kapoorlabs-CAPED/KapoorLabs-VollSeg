@@ -1,18 +1,4 @@
 defaults:
   - _self_
   - experiment_data_paths: predict_jeanzay_unet
-
-parameters:
-  file_type: "*.tif"
-  n_tiles: [2, 8, 8]
-  tile_overlap: 0.125
-  batch_size: 4
-  min_size: 10            # remove_small_objects floor for CC instance labels
-
-  # Multi-GPU: ``devices=-1`` picks up every GPU SLURM / CUDA_VISIBLE_DEVICES
-  # exposes; ``strategy=ddp`` shards the T axis of a 4D input across those
-  # GPUs (one rank per device) via Lightning's ``DistributedSampler``.
-  # Launch under ``srun --ntasks-per-node=<n_gpus> --gres=gpu:<n_gpus>``.
-  devices: -1
-  accelerator: "auto"
-  strategy: "ddp"
+  - parameters: unet

@@ -1,169 +1,160 @@
-"""
-CARE denoising prediction script.
+"""CARE denoising prediction (+ optional PSNR / SSIM scoring).
 
-Applies a trained CARE UNet model to denoise 3D microscopy volumes
-using tiled prediction with overlap blending.
+Mirrors :mod:`predict-unet` end-to-end — top-level
+``from kapoorlabs_vollseg import CAREDenoiser, predict_timelapse,
+ensure_model`` (no walking through ``kapoorlabs_vollseg.care_lightning.*``
+subfolders) and the same Hydra-driven config shape. Loads
+:class:`CAREDenoiser` via :meth:`CAREDenoiser.from_folder` so all tiling
+/ normalisation / padding lives in the singleton, not in this script.
+
+When ``parameters.ref_dir`` points at a folder of clean-reference
+TIFFs (same basenames as the noisy inputs), each output is scored
+against the matching reference via :func:`skimage.metrics.peak_signal_noise_ratio`
+and :func:`structural_similarity`. Leave ``ref_dir`` ``null`` to skip
+scoring.
 """
+
+from __future__ import annotations
 
 import os
 from glob import glob
 from pathlib import Path
 
 import hydra
-import torch
+import numpy as np
 from hydra.core.config_store import ConfigStore
-from lightning import Trainer
+from omegaconf import OmegaConf
+from skimage.metrics import peak_signal_noise_ratio, structural_similarity
 from tifffile import imread, imwrite
-from torch.utils.data import DataLoader
+from tqdm import tqdm
 
-from careamics.models.unet import UNet
+from kapoorlabs_vollseg import CAREDenoiser, ensure_model, predict_timelapse
 
-from kapoorlabs_vollseg.care_lightning.dataset import (
-    CarePredictionDataset,
-    compute_tile_shape,
-)
-from kapoorlabs_vollseg.care_lightning.module import CareModule, stitch_tiles
-from kapoorlabs_vollseg.care_lightning.transforms import PercentileNormalize
-from kapoorlabs_vollseg.care_lightning.utils import load_checkpoint_model
+from scenarios import CarePredictScenario
 
-from scenario_predict_care import CarePredictClass
-from _arch_loader import load_arch_from_training_config
 
-configstore = ConfigStore.instance()
-configstore.store(name="CarePredictClass", node=CarePredictClass)
+ConfigStore.instance().store(name="CarePredictScenario", node=CarePredictScenario)
+
+
+def _score(denoised: np.ndarray, ref: np.ndarray) -> dict:
+    """Return ``{psnr, ssim}`` between ``denoised`` and ``ref``.
+
+    Both arrays are cast to ``float32`` and rescaled to a shared
+    ``[0, 1]`` dynamic range using the reference's min/max, so PSNR /
+    SSIM aren't sensitive to ``CAREDenoiser`` outputting a different
+    intensity scale from the reference (e.g. percentile-normalised vs
+    raw uint16).
+    """
+    ref = ref.astype(np.float32)
+    denoised = denoised.astype(np.float32)
+    ref_min, ref_max = float(ref.min()), float(ref.max())
+    span = max(ref_max - ref_min, 1e-8)
+    ref_n = (ref - ref_min) / span
+    den_n = np.clip((denoised - ref_min) / span, 0.0, 1.0)
+    psnr = float(peak_signal_noise_ratio(ref_n, den_n, data_range=1.0))
+    # SSIM needs a 2D / 3D win_size that fits inside every axis; pick
+    # the largest odd ``win`` <= 7 that all axes can accommodate.
+    win = min(7, min(ref_n.shape))
+    if win % 2 == 0:
+        win -= 1
+    win = max(win, 3)
+    ssim = float(
+        structural_similarity(
+            ref_n, den_n, data_range=1.0, win_size=win, channel_axis=None
+        )
+    )
+    return {"psnr": psnr, "ssim": ssim}
 
 
 @hydra.main(
     config_path="../conf", config_name="scenario_predict_care", version_base="1.3"
 )
-def main(config: CarePredictClass):
-    # JSON next to the ckpt wins over the Hydra parameter yaml — a
-    # checkpoint may have been trained with a different arch than the
-    # current `parameters/care.yaml`.
-    log_path = config.train_data_paths.log_path
-    json_params = load_arch_from_training_config(log_path)
-    if json_params:
-        print(f"Loaded arch from {log_path}/training_config.json")
+def main(config: CarePredictScenario):
+    paths = config.experiment_data_paths
+    p = config.parameters
 
-    # Model architecture
-    unet_depth = json_params.get("unet_depth", config.parameters.unet_depth)
-    num_channels_init = json_params.get(
-        "num_channels_init", config.parameters.num_channels_init
-    )
-    use_batch_norm = json_params.get("use_batch_norm", config.parameters.use_batch_norm)
-    conv_dims = json_params.get("conv_dims", 3)
-    in_channels = json_params.get("in_channels", 1)
-    num_classes = json_params.get("num_classes", 1)
+    input_dir = os.path.join(paths.base_data_dir, paths.input_dir)
+    output_dir = Path(paths.base_data_dir) / paths.input_dir / paths.output_dir
+    output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Prediction parameters
-    devices = config.parameters.devices
-    accelerator = "cuda" if torch.cuda.is_available() else "cpu"
-    n_tiles = config.parameters.n_tiles
-    tile_overlap = config.parameters.tile_overlap
-    batch_size = config.parameters.batch_size
-    pmin = config.parameters.pmin
-    pmax = config.parameters.pmax
-    file_type = config.parameters.file_type
+    log_path = paths.log_path
+    hf_repo_id = OmegaConf.select(paths, "hf_repo_id", default=None)
+    hf_model_dir = OmegaConf.select(paths, "hf_model_dir", default="")
+    if (not log_path or not Path(log_path).is_dir()) and hf_repo_id:
+        name = hf_repo_id.split("/")[-1]
+        log_path = str(ensure_model(hf_model_dir or log_path, name, repo_id=hf_repo_id))
+    print(f"Loading CARE from {log_path}")
+    care = CAREDenoiser.from_folder(log_path)
+    n_tiles = tuple(p.n_tiles)
 
-    # Data paths
-    base_data_dir = config.experiment_data_paths.base_data_dir
-    input_dir = os.path.join(base_data_dir, config.experiment_data_paths.input_dir)
-    output_dir = os.path.join(base_data_dir, config.experiment_data_paths.output_dir)
+    ref_dir = Path(p.ref_dir) if p.ref_dir else None
+    if ref_dir is not None and not ref_dir.is_dir():
+        print(f"WARNING: ref_dir {ref_dir} does not exist — scoring disabled")
+        ref_dir = None
 
-    # Model checkpoint
-    ckpt_path = load_checkpoint_model(log_path)
+    files = sorted(glob(os.path.join(input_dir, p.file_type)))
+    print(f"Found {len(files)} input file(s) — predicting with n_tiles={n_tiles}")
+    if ref_dir is not None:
+        print(f"Scoring against clean references in {ref_dir}")
 
-    if ckpt_path is None:
-        raise ValueError(f"No checkpoint found in {log_path}")
+    scores: list[dict] = []
+    for f in tqdm(files, desc="files", unit="file"):
+        basename = os.path.basename(f)
+        vol = imread(f)
+        out_path = output_dir / basename
 
-    print(f"Loading model from: {ckpt_path}")
+        if vol.ndim == 4:
+            out = predict_timelapse(
+                care,
+                vol,
+                devices=p.devices,
+                accelerator=p.accelerator,
+                strategy=p.strategy,
+                enable_progress_bar=True,
+                n_tiles=n_tiles,
+            )
+            if not out:
+                continue
+            denoised = out["denoised"]
+        else:
+            denoised = care.predict(vol, n_tiles=n_tiles).denoised
 
-    # Create output directory
-    Path(output_dir).mkdir(exist_ok=True, parents=True)
+        # Round-trip via uint16: CARE outputs float32 in roughly the
+        # input's dynamic range — clip + cast keeps file sizes sane and
+        # matches what the keras CARE pipeline wrote.
+        out_uint16 = np.clip(denoised, 0, np.iinfo(np.uint16).max).astype(np.uint16)
+        imwrite(out_path, out_uint16)
 
-    # Build UNet using arch knobs that came from JSON (or Hydra fallback).
-    network = UNet(
-        conv_dims=conv_dims,
-        in_channels=in_channels,
-        num_classes=num_classes,
-        depth=unet_depth,
-        num_channels_init=num_channels_init,
-        use_batch_norm=use_batch_norm,
-    )
+        if ref_dir is not None:
+            ref_path = ref_dir / basename
+            if not ref_path.is_file():
+                tqdm.write(f"  → {out_path}   (no ref {ref_path.name} — score skipped)")
+                continue
+            ref_vol = imread(ref_path)
+            if ref_vol.shape != denoised.shape:
+                tqdm.write(
+                    f"  → {out_path}   (ref shape {ref_vol.shape} != "
+                    f"pred shape {denoised.shape} — score skipped)"
+                )
+                continue
+            s = _score(denoised, ref_vol)
+            s["file"] = basename
+            scores.append(s)
+            tqdm.write(
+                f"  → {out_path}   PSNR={s['psnr']:.2f} dB  SSIM={s['ssim']:.4f}"
+            )
+        else:
+            tqdm.write(f"  → {out_path}   shape={denoised.shape}")
 
-    # Normalizer for prediction tiles
-    normalizer = PercentileNormalize(pmin=pmin, pmax=pmax)
-
-    # Load model
-    model = CareModule.load_from_checkpoint(
-        ckpt_path,
-        map_location="cpu",
-        weights_only=False,
-        network=network,
-        n_tiles=n_tiles,
-        tile_overlap=tile_overlap,
-    )
-    model.eval()
-
-    # Find input files
-    input_files = sorted(glob(os.path.join(input_dir, file_type)))
-    print(f"Found {len(input_files)} input files")
-    print(f"Tile config: n_tiles={n_tiles}, overlap={tile_overlap}")
-
-    # Create trainer for prediction
-    trainer = Trainer(
-        accelerator=accelerator,
-        devices=devices,
-        logger=False,
-        enable_checkpointing=False,
-        enable_progress_bar=True,
-    )
-
-    for input_file in input_files:
-        basename = os.path.basename(input_file)
-        print(f"\nProcessing: {basename}")
-
-        volume = imread(input_file)
-
-        # Handle multi-channel: take first channel
-        if volume.ndim == 4:
-            volume = volume[:, 0] if volume.shape[1] < volume.shape[0] else volume[0]
-
-        print(f"  Volume shape: {volume.shape}")
-
-        # Compute tile shape from n_tiles
-        tile_shape = compute_tile_shape(volume.shape, n_tiles)
-        print(f"  Tile shape: {tile_shape}")
-
-        # Create prediction dataset
-        pred_dataset = CarePredictionDataset(
-            volume=volume,
-            tile_shape=tile_shape,
-            overlap=tile_overlap,
-            normalizer=normalizer,
+    if scores:
+        mean_psnr = float(np.mean([s["psnr"] for s in scores]))
+        mean_ssim = float(np.mean([s["ssim"] for s in scores]))
+        print(
+            f"\nMean over {len(scores)} files — "
+            f"PSNR={mean_psnr:.2f} dB  SSIM={mean_ssim:.4f}"
         )
 
-        pred_dataloader = DataLoader(
-            pred_dataset,
-            batch_size=batch_size,
-            shuffle=False,
-            num_workers=0,
-        )
-
-        print(f"  {len(pred_dataset)} tiles, running prediction...")
-
-        # Run tiled prediction
-        predictions = trainer.predict(model, pred_dataloader)
-
-        # Stitch tiles back together
-        denoised = stitch_tiles(predictions, volume.shape, tile_overlap)
-
-        # Save output
-        output_path = os.path.join(output_dir, basename)
-        imwrite(output_path, denoised)
-        print(f"  Saved: {output_path}")
-
-    print("\nPrediction complete!")
+    print("\nDone.")
 
 
 if __name__ == "__main__":
