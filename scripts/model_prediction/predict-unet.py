@@ -5,6 +5,16 @@ singleton handles tiled prediction, multi-Otsu thresholding of the
 probability map, connected-components labelling, and
 ``remove_small_objects`` cleanup — so the output TIFF is a uint16
 instance label image ready for downstream watershed / measurement.
+
+Three TIFFs are written per input file (same basename, different
+suffix), so post-thresholding artefacts can be inspected against the
+raw network output:
+
+- ``<basename>.tif``       — uint16 instance labels (final).
+- ``<basename>.prob.tif``  — float32 sigmoid probability map, exactly
+  what the network produced before any thresholding.
+- ``<basename>.mask.tif``  — uint8 binary mask after multi-Otsu, before
+  connected-components.
 """
 
 from __future__ import annotations
@@ -61,8 +71,13 @@ def main(config: UNetPredictScenario):
     print(f"Found {len(files)} input file(s) — predicting with n_tiles={n_tiles}")
     for f in tqdm(files, desc="files", unit="file"):
         basename = os.path.basename(f)
-        vol = imread(f)
+        stem = Path(basename).stem
+        suffix = Path(basename).suffix or ".tif"
         out_path = output_dir / basename
+        prob_path = output_dir / f"{stem}.prob{suffix}"
+        mask_path = output_dir / f"{stem}.mask{suffix}"
+
+        vol = imread(f)
 
         if vol.ndim == 4:
             out = predict_timelapse(
@@ -76,17 +91,40 @@ def main(config: UNetPredictScenario):
             )
             if not out:
                 continue
-            labels_t = [out["labels"][t] for t in range(out["labels"].shape[0])]
-            stacked = np.stack(labels_t, axis=0)
-            imwrite(out_path, stacked)
+            labels = np.ascontiguousarray(out["labels"], dtype=np.uint16)
+            imwrite(out_path, labels)
+            if out.get("probability") is not None:
+                imwrite(
+                    prob_path,
+                    np.ascontiguousarray(out["probability"], dtype=np.float32),
+                )
+            if out.get("semantic") is not None:
+                imwrite(
+                    mask_path,
+                    np.ascontiguousarray((out["semantic"] > 0).astype(np.uint8) * 255),
+                )
             tqdm.write(
-                f"  → {out_path}   shape={stacked.shape}, "
-                f"max CC/frame={max(int(x.max()) for x in labels_t)}"
+                f"  → {out_path}   shape={labels.shape}, "
+                f"max CC/frame={int(labels.reshape(labels.shape[0], -1).max(axis=1).max())} "
+                f"| prob → {prob_path.name}  mask → {mask_path.name}"
             )
         else:
             result = unet.predict(vol, n_tiles=n_tiles)
-            imwrite(out_path, result.labels.astype(np.uint16))
-            tqdm.write(f"  → {out_path}   ({int(result.labels.max())} CC labels)")
+            imwrite(out_path, np.ascontiguousarray(result.labels, dtype=np.uint16))
+            if result.probability is not None:
+                imwrite(
+                    prob_path,
+                    np.ascontiguousarray(result.probability, dtype=np.float32),
+                )
+            if result.semantic is not None:
+                imwrite(
+                    mask_path,
+                    np.ascontiguousarray((result.semantic > 0).astype(np.uint8) * 255),
+                )
+            tqdm.write(
+                f"  → {out_path}   ({int(result.labels.max())} CC labels) "
+                f"| prob → {prob_path.name}  mask → {mask_path.name}"
+            )
 
     print("\nDone.")
 

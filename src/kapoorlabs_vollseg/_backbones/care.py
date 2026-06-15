@@ -15,6 +15,8 @@ held as ``self.network``, hyperparameters ignored on
 
 from __future__ import annotations
 
+import importlib.abc
+import importlib.machinery
 import sys
 import types
 from pathlib import Path
@@ -25,62 +27,83 @@ import torch
 from ..care_lightning.module import CareModule
 
 
-def _install_pickle_stubs(*module_paths: str) -> None:
-    """Install stub modules that satisfy ``torch.load``'s class lookups.
+def _make_stub_getattr(stub_module):
+    """Build a ``__getattr__`` that returns a dummy class for any name.
 
-    Lightning checkpoints pickle class references for the scheduler /
-    optimizer / preset modules used at training time
-    (e.g. ``kapoorlabs_lightning.care_presets``). When the prediction
-    environment doesn't have those packages installed, ``torch.load``
-    raises ``ModuleNotFoundError`` before it ever gets to the
-    state_dict — even though for architecture inference we only need
-    tensor shapes.
-
-    For each missing dotted path, install a ``types.ModuleType`` whose
-    ``__getattr__`` returns a freshly-minted dummy class. Pickle's
-    ``find_class`` is satisfied, the class is never actually
-    instantiated with real state (Lightning re-builds the optimizer
-    fresh on ``load_from_checkpoint``), and the state_dict loads
-    normally. No-op when the real module is importable.
-
-    Stubs are tagged with a ``_kapoorlabs_stub`` attribute so a later
-    call doesn't overwrite a real module that happened to get imported
-    in between.
+    Dunder attributes (``__file__``, ``__name__``, ``__loader__``, …)
+    must NOT be intercepted — Python's ``inspect`` / ``traceback`` /
+    ``importlib`` machinery probes them via ``getattr`` and expects
+    strings or ``None``, never a class. Returning a class for
+    ``__file__`` produces ``AttributeError("type object '__file__' has
+    no attribute 'endswith'")`` when Hydra tries to format a traceback.
     """
-    for path in module_paths:
-        try:
-            __import__(path)
-            continue  # real module is importable; nothing to do
-        except ImportError:
-            pass
-        parts = path.split(".")
-        for i in range(1, len(parts) + 1):
-            sub = ".".join(parts[:i])
-            existing = sys.modules.get(sub)
-            if existing is not None and not getattr(
-                existing, "_kapoorlabs_stub", False
-            ):
-                continue  # real package already loaded
-            stub = types.ModuleType(sub)
-            # ``__path__ = []`` marks this as a namespace package, so
-            # ``__import__("foo.bar")`` can resolve ``bar`` against this
-            # parent stub without hitting filesystem lookup machinery.
-            stub.__path__ = []
-            stub._kapoorlabs_stub = True
-            stub.__getattr__ = lambda name, _s=stub: type(
-                name, (object,), {"__module__": _s.__name__}
-            )
-            sys.modules[sub] = stub
+
+    def __getattr__(name):
+        if name.startswith("__") and name.endswith("__"):
+            raise AttributeError(name)
+        return type(name, (object,), {"__module__": stub_module.__name__})
+
+    return __getattr__
 
 
-# Stubs are installed once at import time — keeps the prediction env
-# lean (no need to install kapoorlabs-lightning just to deserialize a
-# checkpoint that referenced one of its preset classes).
-_install_pickle_stubs(
-    "kapoorlabs_lightning.care_presets",
-    "kapoorlabs_lightning.optimizers",
-    "kapoorlabs_lightning.schedulers",
-)
+class _StubLoader(importlib.abc.Loader):
+    def create_module(self, spec):
+        stub = types.ModuleType(spec.name)
+        stub.__path__ = []  # mark as namespace package so submodules resolve
+        stub.__file__ = "<kapoorlabs_vollseg pickle stub>"
+        stub._kapoorlabs_stub = True
+        stub.__getattr__ = _make_stub_getattr(stub)
+        return stub
+
+    def exec_module(self, module):
+        # Body is intentionally empty — the stub is fully populated by
+        # ``create_module`` and resolves any further attribute access
+        # lazily via ``__getattr__``.
+        return None
+
+
+class _StubFinder(importlib.abc.MetaPathFinder):
+    """Catch-all finder for any submodule under a missing top-level package.
+
+    Installed once at import time when the real package isn't available,
+    so ``torch.load`` can deserialize Lightning checkpoints that pickled
+    class references from ANY submodule of that package (e.g.
+    ``kapoorlabs_lightning.care_presets``,
+    ``kapoorlabs_lightning.care_transforms``,
+    ``kapoorlabs_lightning.optimizers``…) without us having to enumerate
+    every one. The class references end up as dummy classes; Lightning
+    rebuilds the optimizer / scheduler / transforms fresh on
+    ``load_from_checkpoint`` so the dummies are never instantiated.
+    """
+
+    def __init__(self, prefix: str):
+        self.prefix = prefix
+
+    def find_spec(self, fullname, path, target=None):
+        if fullname == self.prefix or fullname.startswith(self.prefix + "."):
+            return importlib.machinery.ModuleSpec(fullname, _StubLoader())
+        return None
+
+
+def _install_pickle_stub_finder(prefix: str) -> None:
+    """Install a :class:`_StubFinder` for ``prefix`` unless the real
+    top-level package is already importable."""
+    try:
+        __import__(prefix)
+        return  # real package present; no stubbing needed
+    except ImportError:
+        pass
+    if any(isinstance(f, _StubFinder) and f.prefix == prefix for f in sys.meta_path):
+        return  # already installed
+    sys.meta_path.append(_StubFinder(prefix))
+
+
+# Catch every ``kapoorlabs_lightning.*`` reference in pickled
+# checkpoints written by training runs that used the standalone
+# kapoorlabs-lightning package — care_presets, care_transforms,
+# optimizers, schedulers, anything else. The prediction env doesn't
+# need that package installed.
+_install_pickle_stub_finder("kapoorlabs_lightning")
 
 
 def _build_unet(
