@@ -16,6 +16,7 @@ scoring.
 
 from __future__ import annotations
 
+import gc
 import os
 from glob import glob
 from pathlib import Path
@@ -25,7 +26,7 @@ import numpy as np
 from hydra.core.config_store import ConfigStore
 from omegaconf import OmegaConf
 from skimage.metrics import peak_signal_noise_ratio, structural_similarity
-from tifffile import imread, imwrite
+from tifffile import TiffWriter, imread, imwrite
 from tqdm import tqdm
 
 from kapoorlabs_vollseg import CAREDenoiser, ensure_model, predict_timelapse
@@ -119,23 +120,51 @@ def main(config: CarePredictScenario):
         else:
             denoised = care.predict(vol, n_tiles=n_tiles).denoised
 
-        # Round-trip via uint16: CARE outputs float32 in roughly the
-        # input's dynamic range — clip + cast keeps file sizes sane and
-        # matches what the keras CARE pipeline wrote.
-        out_uint16 = np.clip(denoised, 0, np.iinfo(np.uint16).max).astype(np.uint16)
-        imwrite(out_path, out_uint16)
+        # The input volume can be tens of GB on disk and is no longer
+        # needed for the predict/write path — drop it before we allocate
+        # the uint16 output buffer. The OOM that ships ``Killed`` with
+        # no traceback after the Predicting bar completes is the kernel
+        # tipping over on the (input vol) + (float32 denoised stack) +
+        # (float32 clip copy) + (uint16 cast copy) pile.
+        del vol
+        gc.collect()
+
+        # Write the denoised stack as float32 — CARE's output is
+        # already normalised to roughly ``[0, 1]`` (training distribution),
+        # and any uint cast would either zero everything (clip to
+        # ``[0, 65535]``) or destroy the dynamic range (rescale before
+        # cast loses the original intensity scale). Streaming frame by
+        # frame with ``TiffWriter(..., bigtiff=True, contiguous=False)``
+        # keeps memory flat — no full-stack copies allocated.
+        denoised_shape = denoised.shape
+        if denoised.ndim == 4:
+            with TiffWriter(out_path, bigtiff=True) as tw:
+                for t in range(denoised.shape[0]):
+                    tw.write(
+                        np.ascontiguousarray(denoised[t], dtype=np.float32),
+                        contiguous=False,
+                    )
+        else:
+            imwrite(
+                out_path,
+                np.ascontiguousarray(denoised, dtype=np.float32),
+            )
 
         if ref_dir is not None:
             ref_path = ref_dir / basename
             if not ref_path.is_file():
                 tqdm.write(f"  → {out_path}   (no ref {ref_path.name} — score skipped)")
+                del denoised
+                gc.collect()
                 continue
             ref_vol = imread(ref_path)
-            if ref_vol.shape != denoised.shape:
+            if ref_vol.shape != denoised_shape:
                 tqdm.write(
                     f"  → {out_path}   (ref shape {ref_vol.shape} != "
-                    f"pred shape {denoised.shape} — score skipped)"
+                    f"pred shape {denoised_shape} — score skipped)"
                 )
+                del denoised, ref_vol
+                gc.collect()
                 continue
             s = _score(denoised, ref_vol)
             s["file"] = basename
@@ -143,8 +172,13 @@ def main(config: CarePredictScenario):
             tqdm.write(
                 f"  → {out_path}   PSNR={s['psnr']:.2f} dB  SSIM={s['ssim']:.4f}"
             )
+            del ref_vol
         else:
-            tqdm.write(f"  → {out_path}   shape={denoised.shape}")
+            tqdm.write(f"  → {out_path}   shape={denoised_shape}")
+
+        # Final release before the next input file pulls a fresh volume.
+        del denoised
+        gc.collect()
 
     if scores:
         mean_psnr = float(np.mean([s["psnr"] for s in scores]))
