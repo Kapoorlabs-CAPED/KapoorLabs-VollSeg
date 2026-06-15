@@ -1,9 +1,11 @@
 import json
 import os
+from collections import OrderedDict
+from typing import Optional
+
 import torch
 import torch.nn as nn
 from torch import optim
-from collections import OrderedDict
 from lightning import LightningModule
 from .utils import get_most_recent_file
 from . import schedulers
@@ -19,8 +21,13 @@ class BaseModule(LightningModule):
     def __init__(
         self,
         network: nn.Module,
-        loss_func: nn.Module,
-        optim_func: optim,
+        # ``loss_func`` / ``optim_func`` are required at training time
+        # but never invoked during ``predict`` — defaulting them to
+        # ``None`` lets ``load_from_checkpoint`` rebuild the module from
+        # weights alone without forcing the caller to fake a loss /
+        # optimizer that the prediction path will throw away.
+        loss_func: Optional[nn.Module] = None,
+        optim_func: Optional[optim] = None,
         scheduler: schedulers = None,
         automatic_optimization: bool = True,
         on_step: bool = True,

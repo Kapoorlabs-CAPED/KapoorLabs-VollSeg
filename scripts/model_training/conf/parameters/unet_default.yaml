@@ -36,6 +36,13 @@ pmax: 99.9
 augment: true
 gaussian_noise_std: 0.01
 
+# Loss function — "mse" → nn.MSELoss(), "mae" → nn.L1Loss().
+# BCE is intentionally not offered: training the U-Net with regression-
+# style losses against a {0, 1} mask works well for our class-imbalanced
+# data and avoids the sign-flipped local minimum that BCE sometimes
+# converges to on tiny training sets.
+loss: "mse"
+
 # Stored on the LightningModule for inference time
 n_tiles: [1, 4, 4]
 tile_overlap: 0.125

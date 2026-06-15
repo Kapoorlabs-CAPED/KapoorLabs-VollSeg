@@ -15,7 +15,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional, Union
 
-import torch
 
 from ..care_lightning.module import CareModule
 from .care import _build_unet, infer_arch_from_checkpoint
@@ -66,11 +65,12 @@ class UNetBackbone:
             num_channels_init=num_channels_init,
             use_batch_norm=use_batch_norm,
         )
+        # ``loss_func`` / ``optim_func`` are training-only concerns —
+        # ``CareModule`` and ``BaseModule`` default them to ``None``
+        # so the predict path never instantiates them.
         module = CareModule.load_from_checkpoint(
             checkpoint_path=str(checkpoint),
             network=unet,
-            loss_func=torch.nn.BCEWithLogitsLoss(),
-            optim_func=None,
             map_location=map_location,
             weights_only=weights_only,
         )
