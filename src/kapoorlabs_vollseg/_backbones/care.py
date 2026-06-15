@@ -15,12 +15,72 @@ held as ``self.network``, hyperparameters ignored on
 
 from __future__ import annotations
 
+import sys
+import types
 from pathlib import Path
 from typing import Optional, Union
 
 import torch
 
 from ..care_lightning.module import CareModule
+
+
+def _install_pickle_stubs(*module_paths: str) -> None:
+    """Install stub modules that satisfy ``torch.load``'s class lookups.
+
+    Lightning checkpoints pickle class references for the scheduler /
+    optimizer / preset modules used at training time
+    (e.g. ``kapoorlabs_lightning.care_presets``). When the prediction
+    environment doesn't have those packages installed, ``torch.load``
+    raises ``ModuleNotFoundError`` before it ever gets to the
+    state_dict — even though for architecture inference we only need
+    tensor shapes.
+
+    For each missing dotted path, install a ``types.ModuleType`` whose
+    ``__getattr__`` returns a freshly-minted dummy class. Pickle's
+    ``find_class`` is satisfied, the class is never actually
+    instantiated with real state (Lightning re-builds the optimizer
+    fresh on ``load_from_checkpoint``), and the state_dict loads
+    normally. No-op when the real module is importable.
+
+    Stubs are tagged with a ``_kapoorlabs_stub`` attribute so a later
+    call doesn't overwrite a real module that happened to get imported
+    in between.
+    """
+    for path in module_paths:
+        try:
+            __import__(path)
+            continue  # real module is importable; nothing to do
+        except ImportError:
+            pass
+        parts = path.split(".")
+        for i in range(1, len(parts) + 1):
+            sub = ".".join(parts[:i])
+            existing = sys.modules.get(sub)
+            if existing is not None and not getattr(
+                existing, "_kapoorlabs_stub", False
+            ):
+                continue  # real package already loaded
+            stub = types.ModuleType(sub)
+            # ``__path__ = []`` marks this as a namespace package, so
+            # ``__import__("foo.bar")`` can resolve ``bar`` against this
+            # parent stub without hitting filesystem lookup machinery.
+            stub.__path__ = []
+            stub._kapoorlabs_stub = True
+            stub.__getattr__ = lambda name, _s=stub: type(
+                name, (object,), {"__module__": _s.__name__}
+            )
+            sys.modules[sub] = stub
+
+
+# Stubs are installed once at import time — keeps the prediction env
+# lean (no need to install kapoorlabs-lightning just to deserialize a
+# checkpoint that referenced one of its preset classes).
+_install_pickle_stubs(
+    "kapoorlabs_lightning.care_presets",
+    "kapoorlabs_lightning.optimizers",
+    "kapoorlabs_lightning.schedulers",
+)
 
 
 def _build_unet(

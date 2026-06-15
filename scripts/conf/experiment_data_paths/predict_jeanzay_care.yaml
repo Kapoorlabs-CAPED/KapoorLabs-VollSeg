@@ -1,6 +1,6 @@
 base_data_dir: "/lustre/fsn1/projects/rech/jsy/uzj81mi/"
 input_dir: demo_membrane_data
 output_dir: denoised
-log_path: "/lustre/fsn1/projects/rech/jsy/uzj81mi/models_edge_enhancement/"
+log_path: "/lustre/fsn1/projects/rech/jsy/uzj81mi/models_edge_pytorch/"
 hf_repo_id: "KapoorLabs/xenopus-edge-pytorch"
 hf_model_dir: ""
