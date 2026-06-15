@@ -21,6 +21,7 @@ import os
 
 import hydra
 from hydra.core.config_store import ConfigStore
+from omegaconf import OmegaConf
 
 from kapoorlabs_vollseg.data import generate_smart_patches_h5
 
@@ -57,6 +58,11 @@ def main(config: GenScenario):
         max_paste_patches_per_image=p.max_paste_patches_per_image,
         seed=p.seed,
         overwrite=p.overwrite,
+        # Whole-volume percentile normalisation before patch extraction
+        # (CARE-style). Patches arrive in ``[0, 1]``; the trainer does
+        # not re-normalise per patch.
+        pmin=OmegaConf.select(p, "pmin", default=0.1),
+        pmax=OmegaConf.select(p, "pmax", default=99.9),
     )
     print(f"Counts: {counts}")
 

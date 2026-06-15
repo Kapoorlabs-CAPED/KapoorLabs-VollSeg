@@ -31,7 +31,7 @@ Targets:
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Union
+from typing import Optional, Union
 from collections.abc import Sequence
 
 import h5py
@@ -68,6 +68,8 @@ def generate_smart_patches_h5(
     extensions: Sequence[str] = (".tif", ".tiff", ".TIF", ".TIFF"),
     chunk_rows: int = 16,
     overwrite: bool = False,
+    pmin: Optional[float] = 0.1,
+    pmax: Optional[float] = 99.9,
 ) -> dict:
     """Build a unified training H5 containing raw + label (+ optional pre-computed mask).
 
@@ -157,6 +159,8 @@ def generate_smart_patches_h5(
                 paste_augmentation,
                 max_paste_patches_per_image,
                 rng,
+                pmin=pmin,
+                pmax=pmax,
             )
             counts["train_fg"] += fg
             counts["train_paste"] += paste
@@ -178,6 +182,8 @@ def generate_smart_patches_h5(
                 paste_augmentation=False,
                 max_paste_patches_per_image=0,
                 rng=rng,
+                pmin=pmin,
+                pmax=pmax,
             )
             counts["val_fg"] += fg
 
@@ -239,8 +245,21 @@ def _emit_from_file(
     paste_augmentation,
     max_paste_patches_per_image,
     rng,
+    *,
+    pmin: Optional[float] = None,
+    pmax: Optional[float] = None,
 ) -> tuple[int, int]:
     raw = imread(raw_path).astype(np.float32)
+    # Percentile-normalise the WHOLE raw volume BEFORE patch extraction
+    # (CARE-style data prep). Patches inherit ``[0, 1]`` values from
+    # the already-normalised volume, so train-time / val-time / inference
+    # all see the same distribution: a whole-volume percentile of the
+    # raw image. Targets (instance labels / binary masks) are NOT
+    # normalised — they stay int / uint as written.
+    if pmin is not None and pmax is not None:
+        lo = float(np.percentile(raw, pmin))
+        hi = float(np.percentile(raw, pmax))
+        raw = ((raw - lo) / (hi - lo + 1e-8)).clip(0.0, 1.0).astype(np.float32)
     labels = imread(label_path).astype(np.int32)
     if raw.shape != labels.shape:
         raise ValueError(

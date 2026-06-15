@@ -349,19 +349,29 @@ class TrainingPipeline:
         gaussian_noise_std: float = 0.0,
         gaussian_noise_p: float = 0.3,
     ) -> TrainingPipeline:
-        """Build the StarDist train/val transform pair: percentile
-        normalize + optional flip / rot90 / gaussian noise. Stored on
-        ``self._stardist_train_tf`` and ``self._stardist_val_tf`` for
-        :meth:`setup_stardist_h5_datasets` to pick up."""
+        """Build the StarDist train/val transform pair: optional flip /
+        rot90 / gaussian noise. Stored on ``self._stardist_train_tf``
+        and ``self._stardist_val_tf`` for
+        :meth:`setup_stardist_h5_datasets` to pick up.
+
+        No percentile normalisation here — the H5 generator
+        (:func:`kapoorlabs_vollseg.data.generate_smart_patches_h5`)
+        normalises each WHOLE raw volume once before patch extraction
+        (CARE-style), so patches in the dataset are already in
+        ``[0, 1]``. Inference normalises the whole input volume the same
+        way, keeping train and predict distributions matched.
+
+        ``pmin`` / ``pmax`` are kept on the signature for backward
+        compatibility but are no longer used here.
+        """
         from ..stardist import (
             Compose,
             InputGaussianNoise,
-            InputPercentileNormalize,
             RandomFlip,
             RandomRot90,
         )
 
-        train = [InputPercentileNormalize(pmin=pmin, pmax=pmax)]
+        train: list = []
         if augment:
             train.append(RandomFlip(p=flip_p))
             train.append(RandomRot90(p=rotation_p))
@@ -369,8 +379,8 @@ class TrainingPipeline:
                 train.append(
                     InputGaussianNoise(std=gaussian_noise_std, p=gaussian_noise_p)
                 )
-        self._stardist_train_tf = Compose(train)
-        self._stardist_val_tf = InputPercentileNormalize(pmin=pmin, pmax=pmax)
+        self._stardist_train_tf = Compose(train) if train else None
+        self._stardist_val_tf = None
         return self
 
     def setup_unet_transforms(
@@ -381,18 +391,22 @@ class TrainingPipeline:
         augment: bool = True,
         gaussian_noise_std: float = 0.0,
     ) -> TrainingPipeline:
-        """Build the U-Net train/val transform pair — same shape as the
-        StarDist one but operates on ``(raw, mask)`` pairs so flips and
-        rotations are applied jointly to both tensors."""
+        """Build the U-Net train/val transform pair — flip + rot90 (+
+        optional gaussian noise on the raw channel only). Mask is the
+        joint target and stays untouched aside from spatial flips /
+        rotations applied jointly with the raw.
 
-        def _percentile_normalize(raw):
-            flat = raw.flatten()
-            lo = torch.quantile(flat, pmin / 100.0)
-            hi = torch.quantile(flat, pmax / 100.0)
-            return (raw - lo) / (hi - lo + 1e-8)
+        No percentile normalisation here — the H5 generator
+        (:func:`kapoorlabs_vollseg.data.generate_smart_patches_h5`)
+        normalises each WHOLE raw volume once before patch extraction
+        (CARE-style), so ``raw`` patches arrive already in ``[0, 1]``.
+        Inference normalises the whole input volume the same way.
+
+        ``pmin`` / ``pmax`` are kept on the signature for backward
+        compatibility but are no longer used here.
+        """
 
         def _train(raw, mask):
-            raw = _percentile_normalize(raw)
             if augment:
                 for axis in range(raw.dim()):
                     if torch.rand(1).item() < 0.5:
@@ -408,7 +422,7 @@ class TrainingPipeline:
             return raw, mask
 
         def _val(raw, mask):
-            return _percentile_normalize(raw), mask
+            return raw, mask
 
         self._unet_train_tf = _train
         self._unet_val_tf = _val
