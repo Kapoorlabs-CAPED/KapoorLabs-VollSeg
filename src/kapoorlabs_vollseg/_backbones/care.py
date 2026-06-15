@@ -86,13 +86,18 @@ class _StubFinder(importlib.abc.MetaPathFinder):
 
 
 def _install_pickle_stub_finder(prefix: str) -> None:
-    """Install a :class:`_StubFinder` for ``prefix`` unless the real
-    top-level package is already importable."""
-    try:
-        __import__(prefix)
-        return  # real package present; no stubbing needed
-    except ImportError:
-        pass
+    """Install a :class:`_StubFinder` for ``prefix`` unconditionally.
+
+    Python's meta-path finders are consulted only when the standard
+    finders fail, so installing our stub does NOT shadow a real package
+    that ships ``prefix.X``: the standard finder returns a spec first,
+    we're never asked. The stub only fires when ``prefix.X`` is
+    genuinely missing from the env — which is exactly the case we want
+    to handle (e.g. the parent ``kapoorlabs_lightning`` package is
+    installed but the specific submodule pickled into the checkpoint —
+    ``care_presets``, ``care_transforms``, … — was removed in a later
+    release or never bundled in this env).
+    """
     if any(isinstance(f, _StubFinder) and f.prefix == prefix for f in sys.meta_path):
         return  # already installed
     sys.meta_path.append(_StubFinder(prefix))
@@ -102,7 +107,8 @@ def _install_pickle_stub_finder(prefix: str) -> None:
 # checkpoints written by training runs that used the standalone
 # kapoorlabs-lightning package — care_presets, care_transforms,
 # optimizers, schedulers, anything else. The prediction env doesn't
-# need that package installed.
+# need that package installed; if it does have it, real submodules win
+# (we sit at the end of ``sys.meta_path``).
 _install_pickle_stub_finder("kapoorlabs_lightning")
 
 
