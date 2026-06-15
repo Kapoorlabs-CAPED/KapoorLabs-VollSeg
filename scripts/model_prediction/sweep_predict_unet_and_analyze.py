@@ -475,10 +475,34 @@ for i, model_dir in enumerate(model_dirs):
                     axis=0,
                 )
                 imwrite(out_path, np.ascontiguousarray(labels_tzyx, dtype=np.uint16))
+                # ALSO save the raw network output (stitched logits,
+                # before multi-Otsu) as a float32 sidecar so the
+                # thresholding/CC chain can be inspected against what
+                # the model actually produced. Same convention as
+                # ``predict-unet.py`` — ``<stem>.prob.tif``.
+                if out.get("probability") is not None:
+                    prob_path = pred_dir / f"{Path(f.name).stem}.prob.tif"
+                    raw_tzyx = np.stack(
+                        [
+                            out["probability"][t]
+                            for t in range(out["probability"].shape[0])
+                        ],
+                        axis=0,
+                    )
+                    imwrite(
+                        prob_path,
+                        np.ascontiguousarray(raw_tzyx, dtype=np.float32),
+                    )
                 indices_path.write_text(json.dumps(keras_indices))
             else:
                 result = seg.predict(vol, n_tiles=n_tiles)
                 imwrite(out_path, np.ascontiguousarray(result.labels, dtype=np.uint16))
+                if result.probability is not None:
+                    prob_path = pred_dir / f"{Path(f.name).stem}.prob.tif"
+                    imwrite(
+                        prob_path,
+                        np.ascontiguousarray(result.probability, dtype=np.float32),
+                    )
             print(
                 f"   [{j + 1}/{len(input_files)}] wrote {out_path.name} "
                 f"in {_human(time.perf_counter() - t_pred)}"

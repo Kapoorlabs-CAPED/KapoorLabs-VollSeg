@@ -10,10 +10,10 @@ Three TIFFs are written per input file (same basename, different
 suffix), so post-thresholding artefacts can be inspected against the
 raw network output:
 
-- ``<basename>.tif``       — uint16 instance labels (final).
-- ``<basename>.prob.tif``  — float32 sigmoid probability map, exactly
-  what the network produced before any thresholding.
-- ``<basename>.mask.tif``  — uint8 binary mask after multi-Otsu, before
+- ``<basename>.tif``      — uint16 instance labels (final).
+- ``<basename>.prob.tif``  — float32 raw stitched network output (no
+  sigmoid, no thresholding). What the conv stack actually produced.
+- ``<basename>.mask.tif`` — uint8 binary mask after multi-Otsu, before
   connected-components.
 """
 
