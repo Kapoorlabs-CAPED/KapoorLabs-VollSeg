@@ -128,7 +128,7 @@ predictions_root = input_dir / "predictions"
 # a sweep that uses an updated model arch / threshold / config doesn't
 # silently re-use stale cached predictions. Set ``False`` to honour
 # existing caches.
-force_repredict = False
+force_repredict = True
 
 # Multi-GPU sweep prediction knobs. ``predict_timelapse`` shards the
 # T axis across DDP ranks via Lightning's ``DistributedSampler`` — each
@@ -218,12 +218,21 @@ def _final_train_metrics(model_dir: Path) -> dict:
 
     df = pd.read_csv(csv_path)
     out = {"val_loss_final": None, "train_loss_final": None, "epochs_done": None}
-    if "val_loss" in df.columns:
-        last = df["val_loss"].dropna()
-        out["val_loss_final"] = float(last.iloc[-1]) if len(last) else None
-    if "train_loss" in df.columns:
-        last = df["train_loss"].dropna()
-        out["train_loss_final"] = float(last.iloc[-1]) if len(last) else None
+    # Lightning's CSVLogger writes ``train_loss`` per-batch as
+    # ``train_loss_step`` and per-epoch as ``train_loss_epoch`` (because
+    # ``log_metrics`` is called with both ``on_step=True`` and
+    # ``on_epoch=True`` in our base module). Prefer ``*_epoch``, fall
+    # back to bare name, then ``*_step``.
+    for tag, key in (
+        ("val_loss_final", "val_loss"),
+        ("train_loss_final", "train_loss"),
+    ):
+        for col in (f"{key}_epoch", key, f"{key}_step"):
+            if col in df.columns:
+                last = df[col].dropna()
+                if len(last):
+                    out[tag] = float(last.iloc[-1])
+                    break
     if "epoch" in df.columns:
         last = df["epoch"].dropna()
         out["epochs_done"] = int(last.iloc[-1]) if len(last) else None

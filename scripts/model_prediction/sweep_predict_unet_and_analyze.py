@@ -222,12 +222,22 @@ def _final_train_metrics(model_dir: Path) -> dict:
 
     df = pd.read_csv(csv_path)
     out = {"val_loss_final": None, "train_loss_final": None, "epochs_done": None}
-    if "val_loss" in df.columns:
-        last = df["val_loss"].dropna()
-        out["val_loss_final"] = float(last.iloc[-1]) if len(last) else None
-    if "train_loss" in df.columns:
-        last = df["train_loss"].dropna()
-        out["train_loss_final"] = float(last.iloc[-1]) if len(last) else None
+    # Lightning's CSVLogger writes ``train_loss`` per-batch as
+    # ``train_loss_step`` and per-epoch as ``train_loss_epoch`` (because
+    # ``log_metrics`` is called with both ``on_step=True`` and
+    # ``on_epoch=True`` in our base module) — same for val. Prefer the
+    # *_epoch column; fall back to the bare name; finally fall back to
+    # _step. Same priority for both train and val.
+    for tag, key in (
+        ("val_loss_final", "val_loss"),
+        ("train_loss_final", "train_loss"),
+    ):
+        for col in (f"{key}_epoch", key, f"{key}_step"):
+            if col in df.columns:
+                last = df[col].dropna()
+                if len(last):
+                    out[tag] = float(last.iloc[-1])
+                    break
     if "epoch" in df.columns:
         last = df["epoch"].dropna()
         out["epochs_done"] = int(last.iloc[-1]) if len(last) else None
