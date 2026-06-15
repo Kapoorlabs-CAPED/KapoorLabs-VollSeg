@@ -3,7 +3,7 @@
 
 file_type: "*.tif"
 axes: "ZYX"
-n_tiles: [2, 4, 4]
+n_tiles: [2, 8, 8]
 
 channel_nuclei: 1
 channel_membrane: 0
