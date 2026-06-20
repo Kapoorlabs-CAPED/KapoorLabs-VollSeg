@@ -110,9 +110,23 @@ def main(config: UNetTrainScenario):
     )
     pipe.setup_optimizer(optimizer_name, **optimizer_kwargs)
     pipe.setup_scheduler(scheduler_name, **scheduler_kwargs)
+    # Loss selection — yaml key ``parameters.loss`` accepts "mse" or
+    # "mae" (default mse). Anything else raises so a typo in the yaml
+    # surfaces immediately instead of silently falling back.
+    import torch.nn as _nn
+
+    loss_name = OmegaConf.select(p, "loss", default="mse")
+    if loss_name == "mse":
+        unet_loss = _nn.MSELoss()
+    elif loss_name == "mae":
+        unet_loss = _nn.L1Loss()
+    else:
+        raise ValueError(f"parameters.loss must be 'mse' or 'mae', got {loss_name!r}")
+    print(f"U-Net loss: {loss_name} ({type(unet_loss).__name__})")
     pipe.setup_care_module(
         n_tiles=list(p.n_tiles),
         tile_overlap=p.tile_overlap,
+        loss_func=unet_loss,
     )
 
     _save_sidecars(log_path, experiment, p)

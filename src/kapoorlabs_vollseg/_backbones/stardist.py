@@ -67,7 +67,6 @@ class StarDistBackbone:
         module = StarDistModule.load_from_checkpoint(
             checkpoint_path=str(checkpoint),
             network=unet,
-            optim_func=None,
             map_location=map_location,
             weights_only=weights_only,
         )
