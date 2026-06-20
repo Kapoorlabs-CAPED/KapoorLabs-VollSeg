@@ -567,6 +567,51 @@ def _inside_polyhedron(coords, rays, dists, faces):
     return inside
 
 
+def _kernel_halfspaces(polyverts: np.ndarray, faces: np.ndarray) -> np.ndarray:
+    """Half-spaces of the **kernel** of a star-polyhedron — port of
+    ``stardist3d_impl.cpp::halfspaces_kernel`` + ``build_halfspace``.
+
+    For each face triangle ``(A, B, C)``:
+
+        P = B - A,  Q = C - A
+        N = -cross(P, Q)
+        d = -(A · N)
+
+    A point ``p`` is in the kernel iff ``N·p + d ≤ 0`` for every face.
+    Returns a ``(n_faces, 4)`` float64 array with columns
+    ``(Nz, Ny, Nx, d)``.
+    """
+    A = polyverts[faces[:, 0]]  # (F, 3)
+    B = polyverts[faces[:, 1]]
+    C = polyverts[faces[:, 2]]
+    P = B - A
+    Q = C - A
+    # Replicate the cross-product sign convention from build_halfspace —
+    # in (z, y, x) order with the leading minus.
+    Nz = -(P[:, 1] * Q[:, 2] - P[:, 2] * Q[:, 1])
+    Ny = -(P[:, 2] * Q[:, 0] - P[:, 0] * Q[:, 2])
+    Nx = -(P[:, 0] * Q[:, 1] - P[:, 1] * Q[:, 0])
+    N = np.stack([Nz, Ny, Nx], axis=1).astype(np.float64)
+    d = -(A.astype(np.float64) * N).sum(axis=1)
+    return np.concatenate([N, d[:, None]], axis=1)
+
+
+def _convex_hull_halfspaces(polyverts: np.ndarray) -> Optional[np.ndarray]:
+    """Half-spaces of the convex hull of ``polyverts``. Port of
+    ``stardist3d_impl.cpp::halfspaces_convex`` — uses qhull via
+    :class:`scipy.spatial.ConvexHull` (qhull is the same library
+    upstream stardist links against), returns ``(n_facets, 4)`` with
+    rows ``(a, b, c, d)`` such that ``a·z + b·y + c·x + d ≤ 0``
+    inside. ``None`` on a degenerate hull (collinear / coincident
+    polyverts) — caller should fall back to the slow tetrahedron
+    test directly.
+    """
+    try:
+        return ConvexHull(polyverts).equations.astype(np.float64)
+    except Exception:
+        return None
+
+
 def _bbox_iou(bbox_a, mask_a, bbox_b, mask_b) -> float:
     """IoU between two rasterized polyhedra given their bounding-box slices."""
     overlap_slices_a = []
@@ -692,10 +737,60 @@ def _polyhedra_to_label(
         coords = np.stack([g.ravel() for g in grids], axis=1).astype(np.float64)
 
         if ndim == 3 and faces is not None and len(faces) > 0:
-            # Per-face tetrahedron decomposition — the **exact** test the
-            # stardist C kernel runs (just with barycentric coords
-            # instead of four half-space tests; they're equivalent).
-            inside = _inside_polyhedron(coords, rays, d, faces)
+            # Short-circuited tetrahedron decomposition — exact port of
+            # ``stardist3d_impl.cpp:1772``::
+            #
+            #   inside = in_kernel
+            #         OR (in_convex_hull AND inside_polyhedron(...));
+            #
+            # Both the kernel test and the convex-hull test are cheap
+            # batched matmuls — they catch the vast majority of voxels
+            # (kernel handles the polyhedron core, hull rejection
+            # eliminates everything outside the bounding solid), so the
+            # expensive per-face tetrahedron test only runs on the thin
+            # "shell" of voxels that lie between the two. For a typical
+            # cell shape this is ~10–30% of the bbox voxels.
+            #
+            # Build the half-spaces in absolute coords (same frame the
+            # rays argument is in: origin = polyhedron center, so the
+            # voxel test happens in ``coords`` space which is already
+            # offset-from-center).
+            polyverts = (rays * d[:, None]).astype(np.float64)  # absolute
+            kernel_hs = _kernel_halfspaces(polyverts, faces)  # (Fk, 4)
+            hull_hs = _convex_hull_halfspaces(polyverts)  # (Fh, 4) or None
+
+            if hull_hs is None:
+                # Degenerate convex hull (collinear / coincident verts)
+                # — skip the short-circuit and pay the full price.
+                inside = _inside_polyhedron(coords, rays, d, faces)
+            else:
+                # Batched matmul: project every voxel through every
+                # half-space normal in a single matmul. ``coords`` is
+                # already in the center frame so we can treat the
+                # half-space coefficients as homogenous; pad coords
+                # with a 1 to fold in the offset term.
+                coords_h = np.concatenate(
+                    [coords, np.ones((coords.shape[0], 1), dtype=np.float64)],
+                    axis=1,
+                )
+                # in_kernel: every kernel plane satisfies N·p + d ≤ 0.
+                kernel_vals = coords_h @ kernel_hs.T  # (M, Fk)
+                in_kernel = (kernel_vals <= 1e-9).all(axis=1)
+                # in_hull: every hull plane satisfies a·p + d ≤ 0.
+                hull_vals = coords_h @ hull_hs.T  # (M, Fh)
+                in_hull = (hull_vals <= 1e-9).all(axis=1)
+
+                inside = in_kernel.copy()
+                shell = in_hull & ~in_kernel
+                if shell.any():
+                    shell_coords = coords[shell]
+                    shell_inside = _inside_polyhedron(shell_coords, rays, d, faces)
+                    # Scatter the shell result back.
+                    inside[np.where(shell)[0]] = shell_inside
+
+                # Center voxel safety net (matches the unconditional
+                # ``inside_polyhedron`` postcondition).
+                inside |= np.linalg.norm(coords, axis=1) <= 1e-6
         else:
             # 2D / no-faces fallback — same nearest-ray cone as before.
             ray_norms = np.linalg.norm(rays, axis=1, keepdims=True)
