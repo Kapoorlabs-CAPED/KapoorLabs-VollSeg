@@ -31,10 +31,9 @@ import numpy as np
 import torch
 from scipy.spatial import ConvexHull, cKDTree
 from skimage.feature import peak_local_max
-from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 
-from .._lightning.dataset import CarePredictionDataset, compute_tile_shape
+from ._tiling import tile_iterator, total_n_tiles
 from .lightning_module import StarDistModule
 
 
@@ -306,22 +305,33 @@ def _predict_and_stitch(
     pmax,
     device,
 ) -> tuple[np.ndarray, np.ndarray]:
-    n = tuple(n_tiles) if n_tiles is not None else tuple(model.n_tiles)
-    tile_shape = compute_tile_shape(image.shape, n)
+    """Port of ``stardist.models.base._predict_generator`` tile loop.
 
-    # Percentile-normalise the **whole** volume once, BEFORE tiling.
-    # The training pipeline normalises the full source volume
-    # (``pmin``..``pmax``) and then cuts training patches out of that
-    # already-normalised volume, so the model is trained on inputs
-    # scaled against the *image-wide* intensity distribution. To
-    # reproduce that exactly at inference we have to normalise the
-    # whole input first, then tile. The previous code passed
-    # ``PercentileNormalize`` to ``CarePredictionDataset`` which
-    # then re-applied it **per tile** — a tile on dark background
-    # would get its few faint pixels stretched to [0, 1] and look
-    # to the model like full-brightness cells, collapsing the
-    # predictions on dim tiles. Same shape as CSBDeep / stardist's
-    # ``normalize(img)`` before ``predict_instances``.
+    Matches the upstream stardist flow exactly:
+
+    1. Percentile-normalise the whole input volume once.
+    2. Pad each spatial axis up to a multiple of ``block_size`` (= the
+       network's downsample factor, ``2**depth`` for our careamics
+       U-Net). Original stardist's ``StarDistPadAndCropResizer`` does
+       the same — the model can only process inputs whose dims are
+       divisible by that block size, and ``tile_iterator`` requires
+       it for its slice arithmetic.
+    3. Walk tiles with overlap via :func:`tile_iterator` (ported from
+       csbdeep). Each tile is fed to the model **whole**; the cropped
+       interior region of each tile's output is hard-assigned into
+       the destination buffer — **no blending**. Boundary tiles own
+       the volume boundary so no voxel is left at weight 0.
+    4. Crop the padded buffers back to the input volume's shape.
+
+    Compare to ``stardist/models/base.py:496-508``::
+
+        for tile, s_src, s_dst in tile_generator:
+            result_tile = predict_direct(tile)
+            ...
+            for part, part_tile in zip(result, result_tile):
+                part[s_dst] = part_tile[s_src]
+    """
+    # 1. whole-volume percentile normalisation
     image = np.ascontiguousarray(image, dtype=np.float32)
     if pmin is not None and pmax is not None:
         flat = image.ravel()
@@ -329,31 +339,60 @@ def _predict_and_stitch(
         hi = float(np.percentile(flat, pmax))
         image = (image - lo) / (hi - lo + 1e-8)
 
-    dataset = CarePredictionDataset(
-        volume=image,
-        tile_shape=tile_shape,
-        overlap=tile_overlap,
-        normalizer=None,  # already normalised whole-volume above
-    )
-    loader = DataLoader(
-        dataset, batch_size=batch_size, num_workers=num_workers, shuffle=False
-    )
+    # 2. pad to block-size multiple. Network's spatial divisor =
+    # 2**depth (depth-3 U-Net → 8). Read it off the network if
+    # exposed; default to 8.
+    depth = int(getattr(getattr(model, "network", None), "depth", 3))
+    block_size = max(1, 1 << depth)
+    orig_shape = image.shape
+    pad_widths = tuple((0, (-s) % block_size) for s in orig_shape)
+    if any(after > 0 for _, after in pad_widths):
+        image = np.pad(image, pad_widths, mode="reflect")
+    padded_shape = image.shape
 
-    prob_acc = np.zeros(image.shape, dtype=np.float32)
-    dist_acc = np.zeros((model.n_rays, *image.shape), dtype=np.float32)
-    weight = np.zeros(image.shape, dtype=np.float32)
+    # 3. resolve n_tiles / overlap. ``tile_overlap`` is the upstream
+    # ``axes_tile_overlap`` count expressed in voxels — for a depth-3
+    # UNet the receptive field is ~70 voxels so 96 (= 12 blocks of
+    # block_size=8) is the conservative choice that matches stardist's
+    # ``_compute_receptive_field``-derived default. We accept the
+    # caller's ``tile_overlap`` directly (it used to be a fraction; we
+    # now interpret values ``< 1`` as a fraction of the smallest tile
+    # for back-compat, ``>= 1`` as a voxel count).
+    n = (
+        tuple(n_tiles)
+        if n_tiles is not None
+        else tuple(getattr(model, "n_tiles", (1,) * image.ndim))
+    )
+    if len(n) != image.ndim:
+        raise ValueError(
+            f"n_tiles length {len(n)} doesn't match image.ndim {image.ndim}"
+        )
+    if tile_overlap is None:
+        overlap_voxels = 96  # safe default for depth-3 UNet receptive field
+    elif tile_overlap >= 1:
+        overlap_voxels = int(tile_overlap)
+    else:
+        # legacy fractional API — interpret as fraction of the smallest
+        # tile side so existing call-sites don't regress.
+        smallest = min(s // max(t, 1) for s, t in zip(padded_shape, n))
+        overlap_voxels = max(block_size, int(smallest * float(tile_overlap)))
+    n_block_overlaps = tuple(
+        0 if t == 1 else max(1, int(np.ceil(overlap_voxels / block_size))) for t in n
+    )
+    block_sizes = (block_size,) * image.ndim
 
-    # Per-frame, the outer Lightning predict bar only ticks once a whole
-    # frame is done — inside that single tick we run len(loader) forward
-    # passes (e.g. 21 for batch_size=4, 81 tiles). Expose a transient
-    # per-tile bar so the caller sees forward progress within a frame
-    # and can spot a hang vs a slow-but-progressing run.
-    tile_desc = f"tiles[shape={tile_shape},bs={batch_size}]"
-    tile_iter = tqdm(
-        loader,
-        total=len(loader),
+    prob_acc = np.zeros(padded_shape, dtype=np.float32)
+    dist_acc = np.zeros((model.n_rays, *padded_shape), dtype=np.float32)
+
+    total = total_n_tiles(image, n, block_sizes, n_block_overlaps)
+    tile_desc = (
+        f"tiles[n={n},block={block_size},ovlp_blocks={n_block_overlaps},total={total}]"
+    )
+    pbar = tqdm(
+        tile_iterator(image, n, block_sizes, n_block_overlaps),
+        total=total,
         desc=f"  {tile_desc}",
-        unit="batch",
+        unit="tile",
         leave=False,
         dynamic_ncols=True,
         mininterval=0.5,
@@ -361,47 +400,38 @@ def _predict_and_stitch(
     )
     t_tiles = time.perf_counter()
 
+    # 4. per-tile predict + hard-assign. ``tile`` is a view of the
+    # padded image; ``crop`` selects the interior of the prediction
+    # (drops overlap, except at the volume boundary where the tile
+    # owns the boundary); ``write`` is the destination region.
     with torch.no_grad():
-        for tiles, coords in tile_iter:
-            tiles = tiles.to(device)
-            prob, dists, coords_out = model.predict_step((tiles, coords), batch_idx=0)
-            prob = prob.numpy()  # (B, 1, *spatial)
-            dists = dists.numpy()  # (B, N, *spatial)
-            for i in range(prob.shape[0]):
-                zs, ys, xs, tz, ty, tx = (int(v) for v in coords_out[i].tolist())
-                w = _make_blend_weight(image.ndim, (tz, ty, tx), tile_overlap)
-                if image.ndim == 2:
-                    prob_acc[ys : ys + ty, xs : xs + tx] += prob[i, 0] * w
-                    dist_acc[:, ys : ys + ty, xs : xs + tx] += dists[i] * w[None]
-                    weight[ys : ys + ty, xs : xs + tx] += w
-                else:
-                    prob_acc[zs : zs + tz, ys : ys + ty, xs : xs + tx] += prob[i, 0] * w
-                    dist_acc[:, zs : zs + tz, ys : ys + ty, xs : xs + tx] += (
-                        dists[i] * w[None]
-                    )
-                    weight[zs : zs + tz, ys : ys + ty, xs : xs + tx] += w
+        for tile, crop, write in pbar:
+            tile_t = torch.from_numpy(np.ascontiguousarray(tile)).to(device)
+            # predict_step expects (tiles, coords) — coords are unused
+            # by the model itself (we use them upstream for blending,
+            # which is gone now); pass a dummy.
+            dummy_coords = torch.zeros((1, 2 * image.ndim), dtype=torch.int64)
+            # Add batch dim. The model adds the channel dim internally.
+            prob, dists, _ = model.predict_step(
+                (tile_t.unsqueeze(0), dummy_coords), batch_idx=0
+            )
+            prob_np = prob.numpy()[0, 0]  # (1, 1, *spatial) → (*spatial)
+            dist_np = dists.numpy()[0]  # (1, N, *spatial) → (N, *spatial)
+            prob_acc[write] = prob_np[crop]
+            # dist has an extra leading channel axis vs the input grid;
+            # extend the write/crop tuples with ``slice(None)`` at the
+            # front so the channel axis is preserved.
+            write_full = (slice(None),) + tuple(write)
+            crop_full = (slice(None),) + tuple(crop)
+            dist_acc[write_full] = dist_np[crop_full]
 
-    _phase_status(tile_desc, len(loader), time.perf_counter() - t_tiles, "batches")
+    _phase_status(tile_desc, total, time.perf_counter() - t_tiles, "tiles")
 
-    mask = weight > 0
-    prob_acc[mask] /= weight[mask]
-    dist_acc[:, mask] /= weight[mask]  # broadcast over channel axis
+    # 5. crop the padded buffers back to the original (unpadded) shape.
+    crop_back = tuple(slice(0, s) for s in orig_shape)
+    prob_acc = prob_acc[crop_back]
+    dist_acc = dist_acc[(slice(None),) + crop_back]
     return prob_acc, dist_acc
-
-
-def _make_blend_weight(ndim, tile_shape, overlap_fraction):
-    weight = np.ones(tile_shape, dtype=np.float32)
-    for axis in range(ndim):
-        size = tile_shape[axis]
-        overlap_px = max(1, int(size * overlap_fraction))
-        ramp = np.linspace(0, 1, overlap_px, dtype=np.float32)
-        w1d = np.ones(size, dtype=np.float32)
-        w1d[:overlap_px] = ramp
-        w1d[-overlap_px:] = ramp[::-1]
-        shape = [1] * ndim
-        shape[axis] = size
-        weight *= w1d.reshape(shape)
-    return weight
 
 
 # --------------------------------------------------------- rasterization
@@ -574,24 +604,25 @@ def _polyhedra_to_label(
 ) -> np.ndarray:
     """Paint the kept star-polyhedra into a uint16 label image.
 
-    Uses the **nearest-ray** rasterisation already documented at the
-    top of this file: for every voxel in the polyhedron's bbox find
-    the ray direction whose unit vector has the largest dot product
-    with the voxel's direction-from-centre, then keep the voxel iff
-    its distance from the centre is ≤ that ray's predicted length.
-    For ~64+ rays (we use 96 by default) the surface this produces is
-    visually indistinguishable from the per-face tetrahedron paint
-    that stardist's C kernel runs, but the whole inside-test is a
-    single BLAS matmul per polyhedron instead of 188 tetrahedron
-    rasterisations — which is the only way to get acceptable
-    throughput out of pure numpy.
+    **Exact** port of ``stardist/lib/stardist3d_impl.cpp::
+    _COMMON_polyhedron_to_label`` (render_mode "full"), driven by
+    the same ConvexHull face triangulation the rays object carries
+    in upstream stardist. Each polyhedron is decomposed into
+    tetrahedra ``(R=center, A=v_a, B=v_b, C=v_c)`` — one per face
+    — and a voxel is "inside" iff it lies inside at least one such
+    tetrahedron. The check itself is the same four-half-space test
+    the C++ kernel does (here expressed as four non-negative
+    barycentric coordinates, which is algebraically equivalent).
 
-    Painted **only where the label image is currently zero**, so
-    earlier (higher-score) polyhedra win on overlap — same semantics
-    as the keras stardist NMS+paint loop.
+    Painting rule replicated verbatim from the C++ kernel:
 
-    ``faces`` is accepted but unused (kept in the signature for
-    backwards compatibility with callers that pass it explicitly).
+        result[offset] = result[offset] == 0 ? labels[i] : result[offset];
+
+    i.e. **earlier (higher-prob) polyhedra claim a voxel first and
+    later polyhedra leave it alone**. ``kept_idx`` is already
+    descending by score (the NMS guarantees that), so iterating in
+    order is equivalent to upstream stardist's
+    ``np.argsort(prob)[::-1]`` paint order.
     """
     label_img = np.zeros(vol_shape, dtype=np.uint16)
     if len(kept_idx) == 0:
@@ -601,12 +632,10 @@ def _polyhedra_to_label(
     centers = np.asarray(centers, dtype=np.float32)
     dists = np.asarray(dists, dtype=np.float32)
     vol_shape_arr = np.asarray(vol_shape, dtype=np.int64)
-    del faces  # accepted for API compat; not used in the nearest-ray path
 
-    # Precompute unit ray directions once — they don't change per peak.
-    ray_norms = np.linalg.norm(rays, axis=1, keepdims=True)
-    ray_norms[ray_norms == 0] = 1.0
-    ray_unit = (rays / ray_norms).astype(np.float32)  # (n_rays, 3)
+    ndim = rays.shape[1]
+    if ndim == 3 and faces is None:
+        faces = _compute_ray_faces(rays)
 
     paint_desc = f"paint kept[{len(kept_idx)}]"
     pbar = tqdm(
@@ -631,9 +660,10 @@ def _polyhedra_to_label(
         if d.max() <= 0:
             continue
 
-        # Polyhedron's per-axis bbox from the most-positive and
-        # most-negative ray extents.
-        ray_extents = rays * d[:, None]  # (n_rays, 3)
+        # Bounding box of the polyhedron — same arithmetic the C++
+        # ``polyhedron_bbox`` helper uses (clamp positive extent and
+        # negative extent against the ray vertices).
+        ray_extents = rays * d[:, None]  # (n_rays, ndim)
         pos = np.maximum(0.0, ray_extents.max(axis=0))
         neg = np.maximum(0.0, -ray_extents.min(axis=0))
         lo = np.floor(center - neg).astype(np.int64)
@@ -643,31 +673,39 @@ def _polyhedra_to_label(
         if np.any(hi <= lo):
             continue
 
-        # Voxel grid relative to centre. (Nv, 3).
-        z = np.arange(lo[0], hi[0], dtype=np.float32) - center[0]
-        y = np.arange(lo[1], hi[1], dtype=np.float32) - center[1]
-        x = np.arange(lo[2], hi[2], dtype=np.float32) - center[2]
-        Z, Y, X = np.meshgrid(z, y, x, indexing="ij")
-        coords = np.stack([Z.ravel(), Y.ravel(), X.ravel()], axis=1)
+        # Voxel-coord grid inside the bbox, centred on the polyhedron's
+        # origin — same frame ``inside_polyhedron`` uses in the C++
+        # kernel.
+        axes = [np.arange(lo[ax], hi[ax]) - center[ax] for ax in range(ndim)]
+        grids = np.meshgrid(*axes, indexing="ij")
+        coords = np.stack([g.ravel() for g in grids], axis=1).astype(np.float64)
 
-        # Direction from centre to each voxel.
-        norm = np.linalg.norm(coords, axis=1)
-        safe = norm > 1e-6
-        unit = np.zeros_like(coords)
-        unit[safe] = coords[safe] / norm[safe, None]
+        if ndim == 3 and faces is not None and len(faces) > 0:
+            # Per-face tetrahedron decomposition — the **exact** test the
+            # stardist C kernel runs (just with barycentric coords
+            # instead of four half-space tests; they're equivalent).
+            inside = _inside_polyhedron(coords, rays, d, faces)
+        else:
+            # 2D / no-faces fallback — same nearest-ray cone as before.
+            ray_norms = np.linalg.norm(rays, axis=1, keepdims=True)
+            ray_norms[ray_norms == 0] = 1.0
+            ray_unit = (rays / ray_norms).astype(np.float64)
+            norm = np.linalg.norm(coords, axis=1)
+            safe = norm > 1e-6
+            unit = np.zeros_like(coords)
+            unit[safe] = coords[safe] / norm[safe, None]
+            dots = unit @ ray_unit.T
+            nearest = np.argmax(dots, axis=1)
+            inside = norm <= d[nearest]
+            inside |= ~safe  # centre voxel itself
 
-        # Single BLAS matmul: dot product of each voxel's unit vector
-        # against every ray direction. For (Nv, 3) × (3, n_rays) this
-        # is sub-millisecond for typical-cell-sized bboxes.
-        dots = unit @ ray_unit.T  # (Nv, n_rays)
-        nearest = np.argmax(dots, axis=1)
-        inside = norm <= d[nearest]
-        inside |= ~safe  # the centre voxel itself is in
         if not inside.any():
             continue
 
-        mask = inside.reshape(Z.shape)
-        region = label_img[lo[0] : hi[0], lo[1] : hi[1], lo[2] : hi[2]]
+        mask = inside.reshape(grids[0].shape)
+        region = label_img[tuple(slice(int(lo[ax]), int(hi[ax])) for ax in range(ndim))]
+        # ``result[offset] = result[offset]==0 ? labels[i] : result[offset]``
+        # — only paint voxels that are still background.
         paint = mask & (region == 0)
         region[paint] = int(label_value)
 

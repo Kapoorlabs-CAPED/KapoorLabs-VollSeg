@@ -226,6 +226,57 @@ def _subset_timepoints(T: int, n_each: int = 5) -> list[int]:
     return sorted(set(first + mid + last))
 
 
+def _save_subset_companions(
+    input_path: Path,
+    keras_path: Path,
+    keras_indices: list[int] | None,
+    out_dir: Path,
+) -> None:
+    """Write subset-T copies of the raw input and the keras reference
+    next to the predictions so the three stacks (raw / keras / ROI →
+    StarDist) can be loaded side by side in napari.
+
+    Idempotent — both files are written once (skip if present). Both
+    are streamed frame by frame so a long timelapse doesn't pull a
+    full multi-GB stack into memory.
+
+    Layout::
+
+        predictions_root/
+          <stem>.raw.tif      ← raw input cropped to keras_indices
+          <stem>.keras.tif    ← keras reference labels cropped to keras_indices
+          <model_name>/
+            <stem>.tif        ← ROI → StarDist labels (this model's prediction)
+    """
+    if keras_indices is None:
+        return  # 3D / single-frame input; nothing to subset.
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    stem = Path(input_path.name).stem
+    raw_out = out_dir / f"{stem}.raw.tif"
+    keras_out = out_dir / f"{stem}.keras.tif"
+
+    # Load + slice via ``imread`` — same access pattern the predict
+    # loop already uses for the input. Writing the subset back as a
+    # single (T, Z, Y, X) array gives napari/tifffile a real 4D stack.
+    if not raw_out.is_file():
+        vol = imread(input_path)
+        if vol.ndim != 4:
+            return
+        subset = np.ascontiguousarray(vol[keras_indices])
+        imwrite(raw_out, subset, bigtiff=True)
+        print(f"   companion → {raw_out.name}  (T={len(keras_indices)})")
+
+    if keras_path.is_file() and not keras_out.is_file():
+        ref = imread(keras_path)
+        if ref.ndim != 4:
+            imwrite(keras_out, np.ascontiguousarray(ref), bigtiff=True)
+        else:
+            subset = np.ascontiguousarray(ref[keras_indices])
+            imwrite(keras_out, subset, bigtiff=True)
+        print(f"   companion → {keras_out.name}  (T={len(keras_indices)})")
+
+
 def _score_against_keras(
     pred_path: Path,
     keras_path: Path,
@@ -448,6 +499,11 @@ for i, model_dir in enumerate(model_dirs):
             )
 
         keras_path = keras_dir / f.name
+        # Save subset-T raw + keras companions at predictions_root once
+        # (idempotent) so the three stacks — raw input / keras labels /
+        # this model's ROI→StarDist labels — can be loaded side by side
+        # in napari at the exact same T-indices.
+        _save_subset_companions(f, keras_path, keras_indices, predictions_root)
         if not keras_path.is_file():
             print(f"   keras ref missing for {f.name} — skipping score")
             continue
