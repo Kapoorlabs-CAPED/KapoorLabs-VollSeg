@@ -7,7 +7,7 @@ use_batch_norm: true
 
 # StarDist-specific
 n_rays: 96
-anisotropy: [2.0, 1.0, 1.0]    # null for 2D / isotropic 3D
+anisotropy: [2.4285714285714284, 1.0, 1.0]    # Z:Y:X = 17/7 : 1 : 1, matches the keras Xenopus models (so refitted weights are size-comparable)
 loss_lam: 0.2
 
 # Training
