@@ -5,6 +5,8 @@ Supervised denoising: predicts high SNR from low SNR 3D volumes.
 Uses UNet from careamics package.
 """
 
+from typing import Callable, Optional
+
 import numpy as np
 import torch
 from torch import optim
@@ -17,8 +19,8 @@ class CareModule(BaseModule):
     def __init__(
         self,
         network: torch.nn.Module,
-        loss_func: torch.nn.Module = None,
-        optim_func: optim = None,
+        loss_func: Optional[torch.nn.Module] = None,
+        optim_func: Optional[Callable[..., optim.Optimizer]] = None,
         scheduler: schedulers = None,
         automatic_optimization: bool = True,
         on_step: bool = True,

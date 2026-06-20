@@ -1,7 +1,7 @@
 import json
 import os
 from collections import OrderedDict
-from typing import Optional
+from typing import Callable, Optional
 
 import torch
 import torch.nn as nn
@@ -27,7 +27,12 @@ class BaseModule(LightningModule):
         # weights alone without forcing the caller to fake a loss /
         # optimizer that the prediction path will throw away.
         loss_func: Optional[nn.Module] = None,
-        optim_func: Optional[optim] = None,
+        # ``optim_func`` is a *factory* — given ``self.parameters()``
+        # it returns a ``torch.optim.Optimizer``. The old annotation
+        # was the bare ``optim`` module which Python tolerated until
+        # we wrapped it in ``Optional[...]`` (``typing._type_check``
+        # then refused the module). Use the proper callable type.
+        optim_func: Optional[Callable[..., optim.Optimizer]] = None,
         scheduler: schedulers = None,
         automatic_optimization: bool = True,
         on_step: bool = True,
