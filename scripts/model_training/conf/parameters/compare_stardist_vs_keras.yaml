@@ -1,0 +1,20 @@
+# Inference runtime — match what the sweep used so the prediction is
+# directly comparable to the sweep CSV.
+n_tiles: [1, 4, 4]
+tile_overlap: 0.125
+batch_size: 8
+pmin: 0.1
+pmax: 99.9
+
+# Multi-GPU. Single-rank by default — the comparison is one frame at
+# a time, no need for DDP unless the timelapse is huge.
+devices: 1
+accelerator: auto
+strategy: auto
+
+# Subset selection — first/mid/last subset_n_each frames, same as
+# ``sweep_predict_and_analyze.py``.
+subset_n_each: 5
+
+# Set true to recompute even if the CSV already exists.
+force: false
