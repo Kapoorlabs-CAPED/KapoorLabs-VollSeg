@@ -1,0 +1,19 @@
+experiment_data_paths:
+  base_data_dir: /lustre/fsn1/projects/rech/jsy/uzj81mi/
+  input_dir: demo_membrane_data
+  output_dir: denoised
+  log_path: /lustre/fsn1/projects/rech/jsy/uzj81mi/models_edge_pytorch/
+  hf_repo_id: KapoorLabs/xenopus-edge-pytorch
+  hf_model_dir: ''
+parameters:
+  file_type: '*.tif'
+  n_tiles:
+  - 1
+  - 4
+  - 4
+  tile_overlap: 0.125
+  batch_size: 4
+  devices: -1
+  accelerator: auto
+  strategy: ddp
+  ref_dir: null

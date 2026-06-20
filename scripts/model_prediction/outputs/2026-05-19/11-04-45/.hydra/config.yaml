@@ -1,0 +1,16 @@
+parameters:
+  file_type: '*.tif'
+  n_tiles:
+  - 1
+  - 4
+  - 4
+  tile_overlap: 0.125
+  batch_size: 4
+  n_rays: 96
+  prob_thresh: null
+  nms_thresh: null
+experiment_data_paths:
+  base_data_dir: /lustre/fsn1/projects/rech/jsy/uzj81mi/
+  input_dir: demo_data
+  output_dir: prediction
+  log_path: /lustre/fsn1/projects/rech/jsy/uzj81mi/models_stardist_pytorch

@@ -1,0 +1,19 @@
+parameters:
+  file_type: '*.tif'
+  n_tiles:
+  - 2
+  - 8
+  - 8
+  tile_overlap: 0.125
+  batch_size: 4
+  min_size: 10
+  devices: -1
+  accelerator: auto
+  strategy: ddp
+experiment_data_paths:
+  base_data_dir: /lustre/fsn1/projects/rech/jsy/uzj81mi/
+  input_dir: demo_data
+  output_dir: unet
+  log_path: /lustre/fsn1/projects/rech/jsy/uzj81mi/models_unet_pytorch/
+  hf_repo_id: KapoorLabs/xenopus-unet-pytorch
+  hf_model_dir: ''

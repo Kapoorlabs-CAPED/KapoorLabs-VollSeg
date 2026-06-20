@@ -1,0 +1,50 @@
+train_data_paths:
+  base_data_dir: /projects/extern/nhr/nhr_ni/nhr_ni_test/nhr_ni_test_27040/dir.project/edge_enhancement_training/
+  low_dir: low_raw_membrane
+  high_dir: gt_raw_membrane
+  care_h5_file: edge_enhancement_membrane.h5
+  log_path: /projects/extern/nhr/nhr_ni/nhr_ni_test/nhr_ni_test_27040/dir.project/xenopus_edge_enhancement/
+  experiment_name: care_denoising
+experiment_data_paths:
+  base_data_dir: /path/to/data
+  input_dir: raw
+  output_dir: denoised
+parameters:
+  unet_depth: 3
+  num_channels_init: 64
+  use_batch_norm: true
+  patch_z: 8
+  patch_y: 256
+  patch_x: 256
+  learning_rate: 0.0004
+  batch_size: 16
+  epochs: 100
+  num_workers: 8
+  devices: auto
+  accelerator: cuda
+  train_precision: '32'
+  strategy: auto
+  gradient_clip_val: null
+  gradient_clip_algorithm: null
+  slurm_auto_requeue: true
+  optimizer: adam
+  weight_decay: 0.0
+  transform_preset: medium
+  percentile_norm: true
+  pmin: 0.1
+  pmax: 99.9
+  gaussian_noise_std: 0.01
+  spatial_flip_p: 0.5
+  rotation_p: 0.5
+  n_tiles:
+  - 2
+  - 8
+  - 8
+  tile_overlap: 0.125
+  file_type: '*.tif'
+  scheduler:
+    _target_: kapoorlabs_vollseg.care_lightning.schedulers.WarmCosineAnnealingLR
+    t_max: ${parameters.epochs}
+    t_warmup: 5
+    factor: 0.01
+    eta_min: 1.0e-08
