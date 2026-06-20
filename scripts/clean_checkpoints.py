@@ -9,7 +9,7 @@ import os
 import re
 
 # Configuration
-directory = "/lustre/fsn1/projects/rech/jsy/uzj81mi/models_unet_pytorch/"
+directory = "/lustre/fsn1/projects/rech/jsy/uzj81mi/models_unet_pytorch_sweep/unet_sweep_adam_lr1p0e-3_cosine/"
 keep_n_first = 0
 keep_n_middle = 0
 keep_n_last = 1
