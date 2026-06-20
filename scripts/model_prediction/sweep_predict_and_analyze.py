@@ -46,6 +46,8 @@ from kapoorlabs_vollseg import StarDistSegmenter, predict_timelapse
 from kapoorlabs_vollseg._backbones._config import read_thresholds
 from kapoorlabs_vollseg.eval import matching_dataset
 
+
+torch.set_float32_matmul_precision("high")
 # Same opt-in gate as kapoorlabs_vollseg.stardist.inference uses. We
 # tried letting ``sys.stderr.isatty()`` decide but it false-positives
 # on SSH / ``screen`` / ``tee`` / SLURM-with-pty setups where ``\r``
@@ -146,7 +148,7 @@ force_repredict = True
 devices = -1  # -1 = all visible GPUs; 1 for single-GPU runs.
 accelerator = "auto"
 strategy = "ddp"  # "auto" works for single-GPU; explicit DDP for ≥2.
-n_tiles = (1, 8, 8)
+n_tiles = (1, 4, 4)
 # Per-tile batch size inside ``predict_volume``. Default of 4 underuses
 # a V100; bump to 16 for ~3× wall-clock gain when VRAM allows. Drop back
 # to 4 if you OOM mid-frame.

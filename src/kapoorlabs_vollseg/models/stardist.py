@@ -131,6 +131,7 @@ class StarDistSegmenter:
         prob_thresh: Optional[float] = None,
         nms_thresh: Optional[float] = None,
         n_tiles: Optional[tuple[int, ...]] = None,
+        n_block_overlap: Optional[int] = None,
         **_ignored,
     ) -> Result:
         sd = predict_volume(
@@ -148,6 +149,7 @@ class StarDistSegmenter:
             pmax=self.pmax,
             device=self.device,
             faces=getattr(self.backbone, "faces", None),
+            n_block_overlap=n_block_overlap,
         )
         return Result(labels=sd.labels, probability=sd.prob_map)
 

@@ -88,6 +88,7 @@ def predict_volume(
     pmax: Optional[float] = 99.9,
     device: Optional[str] = None,
     faces: Optional[np.ndarray] = None,
+    n_block_overlap: Optional[int] = None,
 ) -> StarDistResult:
     """Run StarDist inference end-to-end on a single 3D (or 2D) volume.
 
@@ -134,6 +135,7 @@ def predict_volume(
         pmin=pmin,
         pmax=pmax,
         device=device,
+        n_block_overlap=n_block_overlap,
     )
 
     labels = nms_to_labels(
@@ -304,6 +306,7 @@ def _predict_and_stitch(
     pmin,
     pmax,
     device,
+    n_block_overlap: Optional[int] = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Port of ``stardist.models.base._predict_generator`` tile loop.
 
@@ -367,18 +370,26 @@ def _predict_and_stitch(
         raise ValueError(
             f"n_tiles length {len(n)} doesn't match image.ndim {image.ndim}"
         )
-    if tile_overlap is None:
-        overlap_voxels = 96  # safe default for depth-3 UNet receptive field
+    # ``n_block_overlap`` (in *blocks*, i.e. multiples of ``block_size``)
+    # is the canonical knob — matches stardist's ``axes_tile_overlap //
+    # block_size``. Default of 6 blocks ≈ 48 voxels covers the depth-3
+    # UNet's empirical receptive field with headroom but doesn't blow
+    # tile sizes up like the original 12-block default did. Override
+    # explicitly when needed; for very deep networks or cells larger
+    # than ~50 vox bump it back up.
+    if n_block_overlap is not None:
+        overlap_blocks = int(n_block_overlap)
+    elif tile_overlap is None:
+        overlap_blocks = 6
     elif tile_overlap >= 1:
-        overlap_voxels = int(tile_overlap)
+        overlap_blocks = max(1, int(np.ceil(float(tile_overlap) / block_size)))
     else:
         # legacy fractional API — interpret as fraction of the smallest
         # tile side so existing call-sites don't regress.
         smallest = min(s // max(t, 1) for s, t in zip(padded_shape, n))
         overlap_voxels = max(block_size, int(smallest * float(tile_overlap)))
-    n_block_overlaps = tuple(
-        0 if t == 1 else max(1, int(np.ceil(overlap_voxels / block_size))) for t in n
-    )
+        overlap_blocks = max(1, int(np.ceil(overlap_voxels / block_size)))
+    n_block_overlaps = tuple(0 if t == 1 else overlap_blocks for t in n)
     block_sizes = (block_size,) * image.ndim
 
     prob_acc = np.zeros(padded_shape, dtype=np.float32)

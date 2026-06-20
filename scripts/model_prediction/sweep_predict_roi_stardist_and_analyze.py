@@ -57,6 +57,7 @@ from kapoorlabs_vollseg import (
 from kapoorlabs_vollseg._backbones._config import read_thresholds
 from kapoorlabs_vollseg.eval import matching_dataset
 
+torch.set_float32_matmul_precision("high")
 # Same opt-in gate as kapoorlabs_vollseg.stardist.inference uses. See
 # sweep_predict_and_analyze.py for the reasoning. Set
 # ``KAPOORLABS_VOLLSEG_PROGRESS=1`` to opt the bars back in.
@@ -107,7 +108,7 @@ force_repredict = False
 devices = -1
 accelerator = "auto"
 strategy = "ddp"
-n_tiles = (1, 8, 8)
+n_tiles = (1, 4, 4)
 predict_batch_size = 8
 
 iou_threshs = (0.3, 0.5, 0.7)
