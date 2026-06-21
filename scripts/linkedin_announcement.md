@@ -32,29 +32,7 @@ A massive thank-you to Uwe Schmidt and Martin Weigert for the original StarDist 
 
 Onward 🚀
 
-#OpenSource #DeepLearning #Microscopy #PyTorch #PyTorchLightning #ComputerVision #BioImage #BioImageAnalysis #StarDist #VollSeg #KapoorLabs
-
----
-
-## Hashtag bank (use top 5-7)
-
 #OpenSource #DeepLearning #PyTorch #PyTorchLightning #Microscopy #BioImageAnalysis #BioImage #ComputerVision #ImageSegmentation #InstanceSegmentation #StarDist #VollSeg #HuggingFace #SegmentationModels #Cellpose #3DImaging #LifeSciences #AI4Bio #KapoorLabs #Reproducibility #ScientificSoftware
 
-## Suggested attachment
 
-The early/mid/late distribution box-plot from `compare_roi_stardist_vs_keras.ipynb` — the side-by-side panel that shows mean volume / radius / surface area landing on top of the keras reference at every developmental stage. Visually settles the "did you actually validate it?" question in two seconds.
-
-## Optional shorter version (1 200 chars-ish for a single-post feed)
-
-**KapoorLabs has ported 3D StarDist (Weigert, Schmidt et al.) from TensorFlow/Keras to PyTorch Lightning — line by line — and we're releasing it free under BSD-3.**
-
-The full algorithm: rays + ConvexHull faces, CSBDeep tiling, kernel + convex-hull short-circuit polyhedron rasteriser, score-descending NMS, earlier-cell-wins paint — all reimplemented natively. Lightning-native training, Hydra configs, HuggingFace Hub for pretrained models, ROI-gated production pipeline.
-
-Validated against the legacy keras reference on Xenopus embryos: mean volume, radius and surface area within ~2 % of keras at every developmental stage. Zero runtime dependency on the upstream `stardist` package or `tensorflow`.
-
-`pip install kapoorlabs-vollseg`
-Repo: https://github.com/Kapoorlabs-CAPED/KapoorLabs-VollSeg
-
-Massive thanks to the original StarDist authors for the science and for the BSD-3 license that made this port possible.
-
-#OpenSource #PyTorch #DeepLearning #Microscopy #BioImageAnalysis #StarDist #KapoorLabs
+The distribution box-plot is shown from `compare_roi_stardist_vs_keras.ipynb` — the side-by-side panel that shows mean volume / radius / surface area landing on top of the keras reference at every developmental stage. Visually settles the "did you actually validate it?" question in two seconds.
