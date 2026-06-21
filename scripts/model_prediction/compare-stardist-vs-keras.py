@@ -34,7 +34,7 @@ import hydra
 import numpy as np
 from hydra.core.config_store import ConfigStore
 from skimage.measure import marching_cubes, mesh_surface_area, regionprops
-from tifffile import imread
+from tifffile import imread, imwrite
 from tqdm import tqdm
 
 from kapoorlabs_vollseg import StarDistSegmenter, predict_timelapse
@@ -214,6 +214,17 @@ def main(config: CompareStarDistVsKerasScenario):
             print("   model returned no labels — skipping")
             continue
         print(f"   StarDist labels stack: {stardist_labels.shape}")
+
+        # Save the StarDist prediction TIFF alongside the CSV — uint16
+        # (matches the sweep + keras label TIFFs so you can drag-drop
+        # all three into napari at the exact same T-indices).
+        sd_tif_path = out_dir / f"{stem}.stardist.tif"
+        imwrite(
+            sd_tif_path,
+            np.ascontiguousarray(stardist_labels, dtype=np.uint16),
+            bigtiff=True,
+        )
+        print(f"   wrote {sd_tif_path}  ({stardist_labels.shape}, uint16)")
 
         # ── 2. load keras reference at the same indices
         keras_path = keras_dir / f.name
