@@ -1,0 +1,24 @@
+parameters:
+  force: true
+  subset_n_each: 5
+  n_tiles:
+  - 1
+  - 4
+  - 4
+  tile_overlap: 0.125
+  batch_size: 8
+  pmin: 0.1
+  pmax: 99.9
+  devices: 1
+  accelerator: auto
+  strategy: auto
+train_data_paths:
+  base_data_dir: /lustre/fsn1/projects/rech/jsy/uzj81mi/segmentation_training/
+  h5_file: xenopus_segmentation.h5
+  log_path: /lustre/fsn1/projects/rech/jsy/uzj81mi/models_stardist_pytorch/
+  experiment_name: xenopus_stardist
+compare_data_paths:
+  input_dir: /lustre/fsn1/projects/rech/jsy/uzj81mi/demo_data
+  input_pattern: '*.tif'
+  keras_dir: /lustre/fsn1/projects/rech/jsy/uzj81mi/demo_data/keras_prediction
+  out_dir: /lustre/fsn1/projects/rech/jsy/uzj81mi/demo_data/compare
