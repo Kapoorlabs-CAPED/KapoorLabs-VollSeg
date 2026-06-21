@@ -143,6 +143,105 @@ then iterates `(prob_thresh, nms_thresh)` over the cached per-peak
 bboxes + masks — paint + match only. ~100× faster than rerunning the
 network per candidate.
 
+Tuned thresholds land in two files inside the model folder:
+
+- `training_config.json["parameters"]["prob_thresh"/"nms_thresh"]` —
+  read by `_backbones/_config.py::read_thresholds`.
+- `thresholds.json` — sidecar with `{prob, nms}` for tooling that
+  prefers a flat file.
+
+**Consumers must read the tuned thresholds explicitly** —
+`StarDistSegmenter.from_folder(...)` only reads architecture knobs,
+NOT thresholds. The prediction scripts (`predict-stardist.py`,
+`compare-stardist-vs-keras.py`, the sweep scorers) call
+`read_thresholds(log_path)` and pass `(prob_thresh, nms_thresh)`
+explicitly into `predict_timelapse(...)`. Skipping that step falls
+back to the `StarDistSegmenter.__init__` defaults (`0.5` / `0.4`).
+
+## Anisotropy
+
+Anisotropy is a per-axis ray scaling that compensates for non-cubic
+voxel spacing. Used as `rays = rays / anisotropy` then re-normalised
+(upstream "divide" convention) inside `rays_3d_golden_spiral`. The
+**train-time and inference-time values must match exactly** —
+mismatch produces systematically smaller / larger polyhedra along
+the affected axis.
+
+Empirical default (`scripts/model_training/conf/parameters/stardist_default.yaml`):
+`anisotropy = [2.4285714285714284, 1.0, 1.0]` — matches the Xenopus
+keras models (Z = 17/7 × XY voxel ratio). Override per dataset.
+
+Persisted in `training_config.json["parameters"]["anisotropy"]` and
+read back at load time by `_backbones/_config.py::read_rays_params`
+→ rays are regenerated deterministically, never cached to a
+`rays.npy` sidecar.
+
+## ROI Mask-UNet gating (production pipeline)
+
+Raw `StarDistSegmenter.predict(frame)` saturates badly on
+mostly-empty volumes. Whole-volume `pmin=0.1 / pmax=99.9`
+normalisation on a frame that's 95–98% background pushes the few
+foreground voxels far outside the training distribution; the
+distance head emits inflated values; polyhedra come out too big.
+
+Symptom in our Xenopus benchmark (compare-stardist-vs-keras.py,
+early-stage frames, ~370 cells in 1560×1560×19):
+
+- Mean nucleus volume **+38% vs keras** at early-stage frames.
+- Mean equivalent radius **+9%**, mean surface area **+21%**.
+- Total tissue volume **+50%** at early-stage frames.
+- Per-frame variance 3-8× wider than keras.
+
+Fix: wrap StarDist in `kapoorlabs_vollseg.pipelines.ROIPipeline`
+with a Mask-UNet ROI model that gates each frame to its
+foreground bbox **before** percentile normalisation. The
+normalisation then operates on the cropped, mostly-foreground
+patch, restoring the training distribution.
+
+```python
+from kapoorlabs_vollseg import (
+    MaskUNetSegmenter, ROIPipeline, StarDistSegmenter,
+)
+
+star = StarDistSegmenter.from_folder(stardist_log_path)
+mask_unet = MaskUNetSegmenter.from_folder(maskunet_log_path)
+pipeline = ROIPipeline(roi_unet=mask_unet, downstream=star)
+
+labels = pipeline.predict(frame).labels
+```
+
+After this change, the same benchmark reports:
+
+| Metric          | Early Δ vs Keras | Mid Δ vs Keras | Late Δ vs Keras |
+|-----------------|------------------|----------------|-----------------|
+| Mean volume     | +1.5%            | -1.8%          | -4.5%           |
+| Mean radius     | ~0%              | -0.3%          | -2.1%           |
+| Mean SA         | -1%              | -4%            | +1%             |
+| Total volume    | +0.2%            | -4.4%          | -5.0%           |
+| Nuclei count    | -3.3%            | -1.9%          | +2.8%           |
+
+Treat `ROIPipeline(roi_unet=mask_unet, downstream=star)` as the
+production model. Bare `StarDistSegmenter.predict` is only
+appropriate for already-cropped patches.
+
+## Validation against keras
+
+End-to-end correctness is verified by
+`scripts/model_prediction/compare-stardist-vs-keras.py` (and the
+ROI variant `compare-roi-stardist-vs-keras.py`). Both run the
+PyTorch port on the same first/mid/last subset of timepoints the
+sweep already scored, compute per-instance regionprops (volume,
+equivalent-sphere radius, marching-cubes surface area), and write
+a CSV the companion notebooks (`compare_stardist_vs_keras.ipynb` /
+`compare_roi_stardist_vs_keras.ipynb`) box-plot by developmental
+stage.
+
+This is the canonical regression test — any change to the
+algorithmic path (rays, rasterizer, NMS, paint, tile stitcher)
+that doesn't keep `mean volume`, `mean radius`, `mean SA`,
+`nuclei count` and their totals within a few percent of the keras
+reference at every stage is a regression and needs an explanation.
+
 ## Lightning module (`lightning_module.py`)
 
 - `forward(x)` → `(prob_logits, dists)` from `StarDistUNet`.
