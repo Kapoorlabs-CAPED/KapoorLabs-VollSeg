@@ -38,6 +38,7 @@ from tifffile import imread
 from tqdm import tqdm
 
 from kapoorlabs_vollseg import StarDistSegmenter, predict_timelapse
+from kapoorlabs_vollseg._backbones._config import read_thresholds
 
 from scenario_compare_stardist_vs_keras import CompareStarDistVsKerasScenario
 
@@ -149,11 +150,20 @@ def main(config: CompareStarDistVsKerasScenario):
     print(f"Keras dir:      {keras_dir}")
     print(f"Output dir:     {out_dir}")
 
-    # ``from_folder`` automatically reads tuned thresholds from the
-    # model's ``training_config.json`` (the threshold optimiser writes
-    # them there). So the comparison runs with whatever (prob, nms)
-    # combo got promoted.
     star = StarDistSegmenter.from_folder(log_path, batch_size=p.batch_size)
+    # ``from_folder`` only reads architecture knobs — NOT thresholds.
+    # Read the tuned ``(prob_thresh, nms_thresh)`` separately via
+    # ``read_thresholds`` and pass them explicitly to every predict
+    # call below. Without this the comparison would run at the
+    # ``StarDistSegmenter.__init__`` defaults (0.5 / 0.4) regardless
+    # of what the optimiser wrote into ``training_config.json``.
+    overrides = read_thresholds(log_path)
+    prob_thresh = overrides.get("prob_thresh", star.prob_thresh)
+    nms_thresh = overrides.get("nms_thresh", star.nms_thresh)
+    print(
+        f"Thresholds:     prob_thresh={prob_thresh}  nms_thresh={nms_thresh}  "
+        f"({'tuned' if overrides else 'default — no training_config.json'})"
+    )
     n_tiles = tuple(p.n_tiles)
 
     input_files = sorted(input_dir.glob(paths_compare.input_pattern))
@@ -193,6 +203,8 @@ def main(config: CompareStarDistVsKerasScenario):
             accelerator=p.accelerator,
             strategy=p.strategy,
             n_tiles=n_tiles,
+            prob_thresh=prob_thresh,
+            nms_thresh=nms_thresh,
         )
         if not out:
             print("   non-rank-0 worker — skipping")
