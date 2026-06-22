@@ -11,7 +11,7 @@ scripts/
 ├── model_prediction/             Hydra predict scripts + comparison scripts + tile sweeps
 ├── curvature_physics/            curvature distribution analysis (Hydra)
 ├── analysis/                     per-model metrics plotting (CSVLogger output)
-├── legacy_segmentation_workflow/ original 01_*.py CopenhagenWorkflow scripts (kept for reference)
+├── legacy_segmentation_workflow/ original 01_*.py driver scripts (kept for already-trained keras weights — see docs/legacy.md)
 ├── conf/                         shared Hydra config groups for the legacy scripts
 ├── upload_pytorch_models_to_hf.py  HF model-repo migration helper
 ├── clean_checkpoints.py          prune per-epoch ckpts after a sweep
@@ -90,4 +90,4 @@ The sweep scorers (`sweep_predict_and_analyze.py`, `sweep_predict_unet_and_analy
 
 ## Legacy
 
-`legacy_segmentation_workflow/` keeps the original `01_*.py` scripts from CopenhagenWorkflow plus their shared `conf/` (referenced by the YAML defaults). Use only when you need to drive an already-trained keras `.h5` zoo from the old API. New work should use the per-task predict + compare scripts above.
+`legacy_segmentation_workflow/` keeps the original `01_*.py` driver scripts (CARE → ROI → U-Net + StarDist → seedpool → CellPose) plus their shared `conf/` groups. They route each model slot to the PyTorch first-class singleton when a `.ckpt` is configured and fall back to the `*Keras` sibling otherwise. Use only when you need to drive already-trained keras `.h5` weights from the old API; see [`docs/legacy.md`](../docs/legacy.md) for the full index of the legacy surface (HF model registry, scripts, upload helper, deprecation notes).

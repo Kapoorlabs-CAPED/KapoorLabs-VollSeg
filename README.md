@@ -175,7 +175,7 @@ KapoorLabs-VollSeg/
 
 ## Legacy code & pretrained models
 
-Anything pre-VollSeg (the original organic `utils.py` with branching for every denoise / ROI / U-Net / StarDist / seedpool combination, plus the keras / csbdeep / stardist `.h5` Xenopus zoo) lives in **[CopenhagenWorkflow](https://github.com/Kapoorlabs-CAPED/CopenhagenWorkflow)**. Use it only if you have already-trained `.h5` weights you can't retrain. Everything else — new training, new prediction, the napari plugins, the HuggingFace zoo — goes through this repo.
+The keras / csbdeep / stardist `.h5` Xenopus zoo, the `*Keras` singleton siblings, and the original `01_*.py` driver scripts (the pre-rewrite VollSeg workflow) all live inside this repo — see [`docs/legacy.md`](docs/legacy.md) for the full index (registry of HF model repos, driver scripts, upload helper, when to fall back to it). Use it only if you have already-trained `.h5` weights you can't retrain. Everything else — new training, new prediction, the napari plugins, the `KapoorLabs/` HuggingFace zoo — goes through the PyTorch path documented above.
 
 ## Development
 
