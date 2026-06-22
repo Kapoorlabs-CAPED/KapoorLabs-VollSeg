@@ -5,7 +5,7 @@ Napari dock widget for the [KapoorLabs-VollSeg](../../README.md) PyTorch segment
 PyTorch-only. The legacy keras stack is intentionally not exposed — this plugin is part of the KapoorLabs in-house tooling, not a general-purpose napari component.
 
 ```bash
-pip install -e plugins/napari
+pip install -e plugins/napari-vollseg
 napari
 # Plugins → KapoorLabs VollSeg
 ```

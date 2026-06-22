@@ -1,93 +1,104 @@
 # Training-data generation
 
-One Hydra-driven script that emits **a single H5** consumed by both
-U-Net and StarDist training. Same patches, same paste-augmentation,
-two trainer-specific target keys.
-
-## H5 layout
-
-```
-/train/raw    (N, *patch_shape)   float32      # always
-/train/label  (N, *patch_shape)   int32        # always — StarDist target source
-/train/mask   (N, *patch_shape)   uint8        # only if binary_mask_dir was set
-/val/raw, /val/label, /val/mask?              same shape, fewer rows
-```
-
-- **StarDist** training reads `raw + label` and derives `(prob, dist)`
-  targets on the fly from the (possibly augmented) labels.
-- **U-Net** training reads `raw + mask` if `mask` is in the H5;
-  otherwise falls back to deriving binary on the fly from `label`.
+Hydra-driven H5 generators, one per task. All scripts emit
+`generate_smart_patches_h5` SmartPatches-style instance-centered
+patches with whole-volume percentile normalisation applied **before**
+patch extraction (CARE-style) — so train, val and inference all see
+the same `[0, 1]` per-volume distribution.
 
 ## Layout
 
 ```
 train_data_generation/
-├── generate-training-data.py     hydra entry point
-├── scenario_generate.py          hydra dataclass schema
-├── conf/
-│   ├── scenario_generate.yaml    defaults composition
-│   ├── parameters/default.yaml   patch shape, foreground veto, paste-aug
-│   └── train_data_paths/
-│       ├── xenopus_default.yaml  edit-locally template
-│       ├── xenopus_jeanzay.yaml  jean-zay paths
-│       └── xenopus_gwdg.yaml     gwdg/grete paths
-├── slurm_generate_jeanzay.sh
-├── slurm_generate_gwdg.sh
-└── README.md
+├── generate-training-data.py        StarDist + U-Net (shared H5)
+├── generate-care-training-data.py   CARE denoiser (low/high pair stack)
+├── generate-roi-training-data.py    ROI Mask-UNet
+├── merge_h5_datasets.py             concat multiple H5s along /train and /val
+├── h5_inspect.py                    quick schema dump for any H5
+├── *_h5_visualizer.ipynb            per-task napari-free notebooks
+├── scenario_generate*.py            Hydra dataclass schemas
+├── conf/                            scenario yamls + parameters/ + train_data_paths/
+├── slurm_generate_{jeanzay,gwdg}.sh         StarDist/U-Net SmartPatches
+├── slurm_generate_care.sh                   CARE H5
+├── slurm_generate_roi.sh                    ROI Mask-UNet H5
+└── slurm_merge_h5.sh                        merge job
 ```
 
-## Patch extraction
+CPU-only — no GPU needed for any of these.
 
-Uses [`kapoorlabs_vollseg.data.generate_smart_patches_h5`](../../src/kapoorlabs_vollseg/data/smart_patches_h5.py),
-which reproduces the original VollSeg ``SmartPatches`` algorithm:
+## StarDist + U-Net (`generate-training-data.py`)
 
-1. **Foreground patches** — instance-centered, kept only if the
-   foreground voxel fraction lies in
-   `[lower_ratio_fore_to_back, upper_ratio_fore_to_back]`. Optionally
-   erodes each instance before binarizing.
-2. **Background-paste augmentation** — for each background voxel, take
-   a patch (which must be pure-zero) and additively blend cell patches
-   into it (`raw_aug = raw_bg + raw_fg`, `label_aug = label_fg`). Keeps
-   the cell silhouette but presents it on a different background
-   context. Train-only; val never sees synthetic patches.
+H5 layout (consumed by `lightning-stardist.py` AND `lightning-unet.py`):
 
-## binary_mask_dir fallback chain
+```
+/train/raw    (N, *patch)   float32   percentile-normalised whole-volume → patch
+/train/label  (N, *patch)   int32     instance labels — StarDist target source
+/train/mask   (N, *patch)   uint8     optional, written when binary_mask_dir is set
+/val/raw, /val/label, /val/mask?      same shape
+```
 
-The U-Net target is the binary mask. The generator picks the source per
-file:
+- StarDist reads `raw + label`, derives `(prob, dist)` targets on the fly.
+- U-Net reads `raw + mask` if present; otherwise derives binary from `label > 0`.
 
-1. If `binary_mask_dir` is set in `train_data_paths` AND a file with the
-   matching basename exists there → write that into the H5's `mask`
-   dataset (preserves any user erosion / hole-filling).
-2. Otherwise → no `mask` dataset is written; the U-Net dataset derives
-   binary on the fly from `label` (which is always present).
+### Patch extraction
 
-The integer label image (`label_dir`) is *always* required —
-SmartPatches needs cell centroids and bg voxel locations.
+`kapoorlabs_vollseg.data.generate_smart_patches_h5`:
 
-## Usage
+1. **Whole-volume normalisation** — `(raw - p_pmin) / (p_pmax - p_pmin)` clipped to `[0, 1]` per source volume, before any patch is cut. Default `pmin=0.1, pmax=99.9`.
+2. **Foreground patches** — instance-centered, kept when the foreground voxel fraction is in `[lower_ratio_fore_to_back, upper_ratio_fore_to_back]`. Optional per-instance erosion before binarising.
+3. **Background-paste augmentation** — for each background voxel, additively blend cell patches into a pure-zero patch (`raw_aug = raw_bg + raw_fg`, `label_aug = label_fg`). Train-only; val never sees synthetic patches.
+
+### `mask` source fallback
+
+1. `binary_mask_dir/<basename>` exists → that file is written into `/.../mask`.
+2. Otherwise → no `mask` dataset; U-Net dataset derives binary from `label > 0` at training time.
+
+The integer label image (`label_dir`) is always required.
+
+## CARE (`generate-care-training-data.py`)
+
+Reads paired low-SNR / high-SNR TIFFs (`low_dir` + `high_dir`, same basenames) and emits one H5 with `/train/{low,high}` and `/val/{low,high}` — stride is `~2/3 × patch` (≈ 33 % overlap) on train and full-patch on val.
+
+```
+/train/low, /train/high   (N, patch_z, patch_y, patch_x)   float32   percentile-normalised
+/val/low,   /val/high     same                                       non-overlapping stride
+```
+
+## ROI Mask-UNet (`generate-roi-training-data.py`)
+
+Same shape as the StarDist/U-Net generator but emits 2D MIP patches consumed by the ROI Mask-UNet trainer.
+
+## Running
 
 ```bash
-# Local
+# Default config = xenopus_jeanzay paths.
 python generate-training-data.py
+python generate-care-training-data.py
+python generate-roi-training-data.py
 
-# Per-cluster path overrides
-python generate-training-data.py train_data_paths=xenopus_jeanzay
+# Override paths or knobs on the CLI:
 python generate-training-data.py train_data_paths=xenopus_gwdg
-
-# Override individual knobs
 python generate-training-data.py \
     parameters.patch_shape=[8,128,128] \
-    parameters.lower_ratio_fore_to_back=0.1 \
     parameters.paste_augmentation=true \
-    parameters.max_paste_patches_per_image=500
+    parameters.max_paste_patches_per_image=500 \
+    parameters.pmin=0.1 parameters.pmax=99.9
 ```
 
 ## SLURM
 
 ```bash
-sbatch slurm_generate_jeanzay.sh
-sbatch slurm_generate_gwdg.sh
+sbatch slurm_generate_jeanzay.sh        # StarDist + U-Net on jean-zay
+sbatch slurm_generate_gwdg.sh           # StarDist + U-Net on grete
+sbatch slurm_generate_care.sh           # CARE H5
+sbatch slurm_generate_roi.sh            # ROI Mask-UNet H5
+sbatch slurm_merge_h5.sh                # merge multiple H5s
 ```
 
-CPU-only (no GPU needed for patch extraction).
+## Inspection
+
+```bash
+python h5_inspect.py                     # dump shape / dtype for every dataset
+```
+
+Open any of the `*_h5_visualizer.ipynb` notebooks to scroll through patches frame by frame — `unet_h5_visualizer.ipynb` also includes a polarity check (the dataset-wide foreground fraction) so an inverted mask is caught before training.

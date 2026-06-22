@@ -1,154 +1,93 @@
-# Segmentation scripts
+# scripts/
 
-Hydra-driven CLI scripts that mirror the segmentation pipeline used in
-[CopenhagenWorkflow](https://github.com/Kapoorlabs-CAPED/CopenhagenWorkflow),
-re-implemented against the new `vollseg` API (Layer 1 singletons + Layer 2/3
-pipelines).
+Hydra-driven CLI for everything not in the SDK: data generation, training, prediction, comparison, analysis, HF model uploads.
 
 ## Layout
 
 ```
 scripts/
-├── scenarios.py                          # @dataclass schemas for Hydra
-├── conf/
-│   ├── scenario_segment.yaml             # default composition
-│   ├── parameters/default.yaml           # runtime knobs (toggles, tiles, sizes)
-│   ├── model_paths/jeanzay.yaml          # model directories on the JeanZay HPC
-│   └── experiment_data_paths/testdataset.yaml
-├── 01_enhance_membrane.py                # CARE denoise → membrane_enhanced/
-├── 01_nuclei_segmentation.py             # VollSeg.from_models → seg_nuclei/
-├── 01_membrane_segmentation_cellpose.py  # VollCellSeg.from_models(cellpose=...) only
-├── 01_vollcellpose_membrane_segmentation.py  # cellpose + nuclei-seeded watershed
-└── 01_segmentation_metrics.py            # vollseg.eval.matching_dataset
+├── train_data_generation/        H5 patch generators (SmartPatches + visualizers)
+├── model_training/               Lightning trainers per task + sweep + threshold optimisation
+├── model_prediction/             Hydra predict scripts + comparison scripts + tile sweeps
+├── curvature_physics/            curvature distribution analysis (Hydra)
+├── analysis/                     per-model metrics plotting (CSVLogger output)
+├── legacy_segmentation_workflow/ original 01_*.py CopenhagenWorkflow scripts (kept for reference)
+├── conf/                         shared Hydra config groups for the legacy scripts
+├── upload_pytorch_models_to_hf.py  HF model-repo migration helper
+├── clean_checkpoints.py          prune per-epoch ckpts after a sweep
+└── linkedin_announcement.md      announcement copy for the StarDist PyTorch port
 ```
 
-## Running
+Each sub-folder owns its own conf tree and its own README:
+
+- [`train_data_generation/README.md`](train_data_generation/README.md)
+- [`model_training/README.md`](model_training/README.md)
+
+## Install
 
 ```bash
-# from repo root
-pip install -e ".[scripts]"      # installs hydra-core, natsort
-
-python scripts/01_enhance_membrane.py
-python scripts/01_nuclei_segmentation.py
-
-# Override any field on the CLI:
-python scripts/01_nuclei_segmentation.py \
-    parameters.use_seedpool=true \
-    parameters.use_care_denoise=true \
-    parameters.n_tiles=[1,2,2]
-
-# Swap config groups (e.g. point at a local model dir):
-python scripts/01_nuclei_segmentation.py model_paths=local
-# → loads conf/model_paths/local.yaml instead of jeanzay.yaml
+pip install -e ".[scripts]"        # adds hydra-core, natsort, huggingface_hub
 ```
 
-## Pipeline composition
+## Pretrained models
 
-`01_nuclei_segmentation.py` builds the segmenter from these toggles in
-`parameters/default.yaml`:
+PyTorch models live under [`KapoorLabs/`](https://huggingface.co/KapoorLabs) on HuggingFace. Every predict YAML in `conf/experiment_data_paths/` exposes a `log_path` (local) and an `hf_repo_id` (remote) — disk wins when present, HF download is the fallback. The mapping `model_name → repo_id` lives in [`src/kapoorlabs_vollseg/hub.py`](../src/kapoorlabs_vollseg/hub.py).
 
-| toggle               | effect                                        |
-| -------------------- | --------------------------------------------- |
-| `use_roi_unet`       | wraps in `ROIPipeline(roi_unet, ...)`         |
-| `use_seedpool`       | wraps in `UNetStarDistPipeline(seedpool=True)` |
-| `use_care_denoise`   | wraps in `DenoisedPipeline(care, ...)`        |
+```
+KapoorLabs/xenopus-stardist-pytorch
+KapoorLabs/xenopus-unet-pytorch
+KapoorLabs/xenopus-maskunet-pytorch
+KapoorLabs/xenopus-care-pytorch
+```
 
-The factory composes them in the order: `chunked(roi(denoised(unet+stardist)))`
-— matching the diagram in the top-level README.
+### Upload / replace HF repos
 
-## Pretrained models — auto-download from HuggingFace
-
-The Xenopus model zoo lives as public model repos under
-`huggingface.co/KapoorLabs-Copenhagen/`. The scripts call
-`kapoorlabs_vollseg.ensure_model(model_dir, model_name)` for every configured model
-before constructing backbones — if the directory `<model_dir>/<model_name>/`
-doesn't exist locally, it's downloaded automatically.
-
-The mapping `model_name → HF repo id` lives in
-[`src/kapoorlabs_vollseg/hub.py`](../src/kapoorlabs_vollseg/hub.py):
-
-| `model_name` (from YAML)       | HF repo                                                            |
-| ------------------------------ | ------------------------------------------------------------------ |
-| `membrane_edge_enhancement`    | `KapoorLabs-Copenhagen/xenopus-care-membrane-edge-enhancement`     |
-| `unet_nuclei_xenopus_mari`     | `KapoorLabs-Copenhagen/xenopus-unet3d-nuclei-mari`                 |
-| `unet_membrane_xenopus_mari`   | `KapoorLabs-Copenhagen/xenopus-unet3d-membrane-mari`               |
-| `unet_roi_nuclei_xenopus`      | `KapoorLabs-Copenhagen/xenopus-maskunet-roi-nuclei`                |
-| `nuclei_xenopus_mari`          | `KapoorLabs-Copenhagen/xenopus-stardist3d-nuclei-mari`             |
-| `membrane_xenopus_mari`        | `KapoorLabs-Copenhagen/xenopus-stardist3d-membrane-mari`           |
-| `mem_mneongreen`               | `KapoorLabs-Copenhagen/xenopus-cellpose-mem-mneongreen`            |
-
-### One-time upload (you run this once)
-
-The model weights live today as private folders inside the dataset
-`KapoorLabs-Copenhagen/Xenopus_Models`. To migrate them into the public
-model repos referenced above:
+`upload_pytorch_models_to_hf.py` migrates a local model folder into its HuggingFace repo. Reads `HF_TOKEN` from `scripts/.env`. Append `--dry-run` to see what would happen without touching HF.
 
 ```bash
-# 1. Pull the dataset locally (or point --source at where it already is)
-huggingface-cli login    # one-time
-git lfs clone https://huggingface.co/datasets/KapoorLabs-Copenhagen/Xenopus_Models
+# First-time upload of one model from the standard layout:
+python scripts/upload_pytorch_models_to_hf.py \
+    --source-root /lustre/.../jean-zay \
+    --only models_stardist_pytorch
 
-# 2. Dry-run to confirm what will be uploaded
-python scripts/_upload_models_to_hf.py \
-    --source Xenopus_Models/Mari_Models \
-    --dry-run
-
-# 3. Actually create + upload each model repo
-python scripts/_upload_models_to_hf.py \
-    --source Xenopus_Models/Mari_Models
+# Replace existing repo with a non-standard folder (e.g. a sweep winner):
+python scripts/upload_pytorch_models_to_hf.py \
+    --source-folder /lustre/.../models_stardist_pytorch_sweep/stardist_sweep_adam_lr1p0e-3_noscheduler \
+    --only models_stardist_pytorch \
+    --replace
 ```
 
-The helper creates each repo as **public**, writes a minimal model card
-if the source folder has none, and uploads the contents. Source layout
-expected (only these are migrated; cellpose3D and the other CellPose
-checkpoints are deliberately ignored):
+The mapping `local_folder_name → HF repo_id` is the `MODELS` dict at the top of the script.
+
+## Prediction
+
+`scripts/model_prediction/` holds one Hydra predict script per task:
 
 ```
-Mari_Models/
-├── CARE/membrane_edge_enhancement/
-├── Unet3D/unet_nuclei_xenopus_mari/
-├── Unet3D/unet_membrane_xenopus_mari/
-├── MASKUNET/unet_roi_nuclei_xenopus/
-├── StarDist3D/nuclei_xenopus_mari/
-├── StarDist3D/membrane_xenopus_mari/
-└── CellPose/mem_mneongreen
+predict-care.py      predict-unet.py      predict-roi.py
+predict-stardist.py  predict-combo.py
 ```
 
-To add a new model later: upload it under `KapoorLabs-Copenhagen/...`,
-add an entry to `kapoorlabs_vollseg.hub.XENOPUS_MODELS`, and an entry to
-`scripts/_upload_models_to_hf.py:SOURCE_LAYOUT` if you want the helper
-to handle it.
+Each script reads `experiment_data_paths.log_path` first; falls back to downloading from `hf_repo_id`. Outputs nest into `<input_dir>/<output_dir>/<file>.tif`.
 
-## CellPose / membrane workflow
+```bash
+# Predict with the local checkpoint (default):
+python scripts/model_prediction/predict-stardist.py
 
-The CellPose hierarchy is a sibling of `VollSeg`, with its own factory:
-
-```python
-from kapoorlabs_vollseg import VollSeg, VollCellSeg, ...
-
-nuclei_pipe = VollSeg.from_models(stardist=star, roi_unet=roi)
-
-# Plain CellPose (no nuclei seeding):
-pipe = VollCellSeg.from_models(cellpose=cellpose)
-
-# Nuclei-seeded watershed (the "VollCellPose" of the original repo):
-pipe = VollCellSeg.from_models(
-    nuclei_pipeline=nuclei_pipe,
-    cellpose=cellpose,
-    nuclei_channel=1,
-    membrane_channel=0,
-)
+# Override the model folder / data on the CLI:
+python scripts/model_prediction/predict-stardist.py \
+    experiment_data_paths.log_path=/lustre/.../models_stardist_pytorch \
+    experiment_data_paths.input_dir=/lustre/.../demo_data
 ```
 
-Two scripts demo each path:
+The sweep scorers (`sweep_predict_and_analyze.py`, `sweep_predict_unet_and_analyze.py`, `sweep_predict_roi_stardist_and_analyze.py`) score every trained sweep model against a keras reference, write `sweep_predict_summary.csv` per task, and drop subset-T raw + keras companion TIFFs alongside the per-model predictions for side-by-side napari viewing.
 
-| script                                            | shape                                               |
-| ------------------------------------------------- | --------------------------------------------------- |
-| `01_membrane_segmentation_cellpose.py`            | `VollCellSeg.from_models(cellpose=...)`             |
-| `01_vollcellpose_membrane_segmentation.py`        | `cellpose_watershed_fuse(membrane, nuclei, mask)` from cached inputs |
+`compare-stardist-vs-keras.py` and `compare-roi-stardist-vs-keras.py` compute per-frame regionprops (volume, equivalent radius, marching-cubes surface area) for both the PyTorch and the keras label stacks at the same T-indices and write a long-format CSV. The companion `compare_*_vs_keras.ipynb` notebooks render box plots stratified by developmental stage.
 
-The latter uses the watershed-fuse kernel directly because nuclei labels
-are usually already cached on disk by the time you run cell segmentation
-— but the file's footer shows the equivalent fully-composed
-`VollCellSeg.from_models(nuclei_pipeline=..., cellpose=...)` call for
-when you want a one-shot run.
+## Analysis
+
+`analysis/plot_metrics{,_unet}.py` walks a sweep folder, reads each model's `metrics.csv` (Lightning CSVLogger), and renders per-model grids, per-metric overlays across all models, and box plots of each model's training distribution.
+
+## Legacy
+
+`legacy_segmentation_workflow/` keeps the original `01_*.py` scripts from CopenhagenWorkflow plus their shared `conf/` (referenced by the YAML defaults). Use only when you need to drive an already-trained keras `.h5` zoo from the old API. New work should use the per-task predict + compare scripts above.
