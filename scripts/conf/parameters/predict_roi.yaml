@@ -1,0 +1,20 @@
+# RoiPredictParams — defaults for predict-roi.py.
+# Architecture (conv_dims=2, unet_depth, num_channels_init, …) is read
+# from training_config.json next to the checkpoint, NOT from yaml.
+
+file_type: "*.tif"
+n_tiles: [1, 4, 4]
+tile_overlap: 0.125
+batch_size: 4
+
+# remove_small_objects floor (voxels) applied to the binary ROI mask
+# after multi-Otsu thresholding + CC labelling.
+min_size_mask: 100
+
+# Multi-GPU: ``devices=-1`` picks up every GPU SLURM / CUDA_VISIBLE_DEVICES
+# exposes; ``strategy=ddp`` shards the T axis of a 4D input across those
+# GPUs (one rank per device) via Lightning's ``DistributedSampler``.
+# Launch under ``srun --ntasks-per-node=<n_gpus> --gres=gpu:<n_gpus>``.
+devices: -1
+accelerator: "auto"
+strategy: "ddp"

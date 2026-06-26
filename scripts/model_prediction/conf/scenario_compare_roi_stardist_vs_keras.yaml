@@ -1,5 +1,0 @@
-defaults:
-  - _self_
-  - parameters: compare_stardist_vs_keras
-  - train_data_paths: xenopus_jeanzay_roi_stardist
-  - compare_data_paths: jeanzay

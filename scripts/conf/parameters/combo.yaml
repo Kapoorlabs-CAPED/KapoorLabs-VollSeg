@@ -1,0 +1,33 @@
+# ComboPredictParams — defaults for predict-combo.py.
+# Pipeline shape is resolved from which experiment_data_paths.{stardist,
+# unet, maskunet} ModelRefs are filled in (any role with empty log_path
+# AND null hf_repo_id is dropped). See VollSeg.from_models composition
+# rules in the top-level README.
+
+file_type: "*.tif"
+n_tiles: [1, 4, 4]
+tile_overlap: 0.125
+batch_size: 4
+
+# StarDist runtime — fallbacks; training_config.json["parameters"] on
+# the StarDist folder overrides when present.
+n_rays: 96
+prob_thresh: 0.4
+nms_thresh: 0.3
+
+# Watershed seed-pool fusion. Honoured only when stardist is set AND
+# (unet OR care) is set — silently dropped otherwise (see permissive
+# composition rules).
+seedpool: false
+
+# Post-processing floors.
+min_size_mask: 100        # remove_small_objects in the MaskUNet ROI
+min_size: 10              # remove_small_objects in the UNet output
+
+# Multi-GPU: ``devices=-1`` picks up every GPU SLURM / CUDA_VISIBLE_DEVICES
+# exposes; ``strategy=ddp`` shards the T axis of a 4D input across those
+# GPUs (one rank per device) via Lightning's ``DistributedSampler``.
+# Launch under ``srun --ntasks-per-node=<n_gpus> --gres=gpu:<n_gpus>``.
+devices: -1
+accelerator: "auto"
+strategy: "ddp"

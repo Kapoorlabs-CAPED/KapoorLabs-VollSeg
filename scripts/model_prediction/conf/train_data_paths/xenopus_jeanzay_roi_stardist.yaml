@@ -1,8 +1,0 @@
-base_data_dir: "/lustre/fsn1/projects/rech/jsy/uzj81mi/segmentation_training/"
-h5_file: "xenopus_segmentation.h5"
-log_path: "/lustre/fsn1/projects/rech/jsy/uzj81mi/models_stardist_pytorch/"
-experiment_name: "xenopus_stardist_roi"
-
-# ROI Mask-UNet that gates StarDist. Loaded once and reused across
-# every input file in the compare loop.
-mask_unet_log_path: "/lustre/fsn1/projects/rech/jsy/uzj81mi/models_maskunet_pytorch/"

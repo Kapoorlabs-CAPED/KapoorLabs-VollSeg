@@ -1,5 +1,4 @@
 defaults:
-    - _self_
-    - train_data_paths: roi_default.yaml
-    - experiment_data_paths: roi_predict.yaml
-    - parameters: roi.yaml
+  - _self_
+  - experiment_data_paths: predict_jeanzay_maskunet
+  - parameters: predict_roi

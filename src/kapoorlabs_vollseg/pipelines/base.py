@@ -18,13 +18,38 @@ import numpy as np
 class Result:
     """Output bundle from any pipeline.
 
-    Fields are all optional — each pipeline fills only what it produces, and
-    composites pass everything else through. ``labels`` is the canonical
-    instance segmentation; ``semantic`` is the raw binary U-Net mask;
-    ``denoised`` is the CARE output; ``roi`` is the gating mask.
+    Every field is optional — each pipeline fills only what it produces and
+    composites pass everything else through.
+
+    Stage outputs (each is populated only when the corresponding model
+    runs; ``None`` otherwise):
+
+    - ``denoised``        — CARE denoised image (CARE only).
+    - ``roi``             — ROI gating mask (Mask-UNet only).
+    - ``unet_labels``     — connected-component labels of the U-Net
+                            semantic mask (U-Net only).
+    - ``stardist_labels`` — raw StarDist instance labels (StarDist only).
+    - ``vollseg_labels``  — watershed-fused VollSeg labels (seed-pool
+                            branch only).
+
+    Convenience aliases — point at one of the stage outputs above:
+
+    - ``labels``      — canonical instance labels = ``vollseg_labels`` if
+                        the seed-pool branch ran, else ``stardist_labels``,
+                        else ``unet_labels``.
+    - ``semantic``    — the binary mask actually used in the segmentation
+                        stage (U-Net mask when supplied, or the
+                        Otsu-threshold fallback in the no-U-Net seed-pool
+                        path).
+    - ``probability`` — probability map from whichever network emitted one.
+    - ``polys``       — StarDist polyhedron metadata (vertices, faces).
+    - ``extra``       — escape hatch for pipeline-specific outputs.
     """
 
     labels: Optional[np.ndarray] = None
+    stardist_labels: Optional[np.ndarray] = None
+    vollseg_labels: Optional[np.ndarray] = None
+    unet_labels: Optional[np.ndarray] = None
     semantic: Optional[np.ndarray] = None
     denoised: Optional[np.ndarray] = None
     roi: Optional[np.ndarray] = None

@@ -101,20 +101,20 @@ class ROIPipeline:
             full[~roi] = 0
             return full
 
-        labels = _restore(result.labels, np.uint32)
-        semantic = _restore(
-            (result.semantic.astype(bool) if result.semantic is not None else None),
-            bool,
-        )
-        probability = (
-            None
-            if result.probability is None
-            else _restore(result.probability, np.float32)
-        )
-
+        # Restore each per-instance label field separately so the
+        # ``stardist_labels`` / ``vollseg_labels`` / ``unet_labels``
+        # contract holds end-to-end (the downstream pipeline produced
+        # these inside the ROI crop; we paste them back into the full-
+        # shape array at the bbox).
         return result.merge(
-            labels=labels,
-            semantic=semantic,
-            probability=probability,
+            labels=_restore(result.labels, np.uint32),
+            stardist_labels=_restore(result.stardist_labels, np.uint32),
+            vollseg_labels=_restore(result.vollseg_labels, np.uint32),
+            unet_labels=_restore(result.unet_labels, np.uint32),
+            semantic=_restore(
+                (result.semantic.astype(bool) if result.semantic is not None else None),
+                bool,
+            ),
+            probability=_restore(result.probability, np.float32),
             roi=roi,
         )

@@ -27,11 +27,16 @@ class TestVollSegFactory:
         with pytest.raises(ValueError):
             VollSeg.from_models()
 
-    def test_seedpool_requires_both_unet_and_stardist(self):
-        with pytest.raises(ValueError):
-            VollSeg.from_models(stardist=_FakePipeline(), seedpool=True)
-        with pytest.raises(ValueError):
-            VollSeg.from_models(unet=_FakePipeline(), seedpool=True)
+    def test_seedpool_silently_ignored_when_prereqs_missing(self):
+        # Permissive composition: ``seedpool=True`` is dropped (not raised)
+        # when its prerequisites aren't met. With only stardist, the
+        # mask-source half (unet OR care) is missing → fall back to bare
+        # StarDist. With only unet, there's nothing to fuse → fall back
+        # to bare U-Net.
+        s = _FakePipeline()
+        assert VollSeg.from_models(stardist=s, seedpool=True) is s
+        u = _FakePipeline()
+        assert VollSeg.from_models(unet=u, seedpool=True) is u
 
     def test_stardist_only_returns_singleton(self):
         s = _FakePipeline()

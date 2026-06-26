@@ -68,23 +68,115 @@ class Pipeline(Protocol):
 
 | Composite                       | Wraps                  | Adds                                                     |
 | ------------------------------- | ---------------------- | -------------------------------------------------------- |
-| `ROIPipeline`                   | any downstream         | Mask-UNet ROI bbox → downstream on the crop              |
-| `UNetStarDistPipeline`          | unet + stardist        | Runs both; `seedpool=True` fuses via watershed/IoU       |
+| `DenoisedPipeline`              | any downstream         | CARE denoise → downstream sees the denoised image        |
+| `ROIPipeline`                   | any downstream         | Mask-UNet ROI bbox → downstream on the crop, paste back  |
+| `UNetStarDistPipeline`          | stardist (+ optional unet) | Side-by-side or seed-pool watershed fusion           |
 | `NucleiSeededCellPosePipeline`  | nuclei pipe + cellpose | Nuclei labels seed a CellPose-gated membrane watershed   |
-| `DenoisedPipeline`              | any downstream         | CARE denoise → downstream                                |
 | `Chunked`                       | any downstream         | Overlapping tiles → predict → label-safe stitch          |
 
-Layer 3 picks the pipeline shape from the supplied models:
+### Composition order
 
-```python
-pipe = VollSeg.from_models(
-    care=care, roi_unet=roi, unet=unet, stardist=star,
-    seedpool=True,                          # needs both unet + stardist
-    chunk=(64, 256, 256),                   # optional → wraps in Chunked
-)
+`VollSeg.from_models(...)` always nests in the same order — only the
+stages whose models you supply appear in the chain:
+
+```
+          ┌─────────┐    ┌──────────┐    ┌─────────┐    ┌──────────────┐    ┌────────┐
+image ──▶ │ Chunked │──▶ │ Denoised │──▶ │   ROI   │──▶ │ segmentation │──▶ │ Result │
+          │ (chunk) │    │  (care)  │    │(roi_unet│    │ core         │    └────────┘
+          └─────────┘    └──────────┘    └─────────┘    │ (stardist /  │
+                                                       │  unet / fused│
+                                                       └──────────────┘
 ```
 
-Invalid combinations raise at construction, not mid-predict.
+Each box is optional and only appears when its model / chunk shape is
+supplied. Image always flows left → right; every stage downstream of
+CARE sees the **denoised** image, not the raw one.
+
+Predict-time flow:
+
+1. **Chunked** (optional) — split big volumes into overlapping tiles.
+2. **DenoisedPipeline** (optional) — CARE denoises the chunk; every
+   downstream stage sees the **denoised** image, never the raw one.
+3. **ROIPipeline** (optional) — Mask-UNet predicts an ROI mask on the
+   denoised image; downstream runs on the bounding-box crop and the
+   labels are pasted back into the full-shape array.
+4. **Segmentation core** — StarDist alone, U-Net alone, or the
+   `UNetStarDistPipeline` composite (side-by-side or fused).
+
+### Segmentation core: how the toggles map to a pipeline
+
+```
+                          unet supplied?
+                          ┌─────────┴─────────┐
+                         yes                  no
+                          │                   │
+                  ┌───────┴────────┐  ┌───────┴────────┐
+                  │ stardist + unet│  │ stardist only  │
+                  └───────┬────────┘  └───────┬────────┘
+                          │                   │
+              seedpool? ──┤                   ├── seedpool?
+                          │                   │
+             ┌──── T ─────┤                   ├──── T ────┐
+             │            │                   │           │
+             │     ┌──── F                    F ────┐     │
+             │     │                                │     │
+             ▼     ▼                                ▼     ▼
+   ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────────┐
+   │ UNet+StarDist    │  │ UNet+StarDist    │  │ UNetStarDist:        │
+   │ + watershed fuse │  │ side-by-side     │  │ Otsu seed pool +     │
+   │ (classic VollSeg)│  │ (no fusion)      │  │ watershed fuse       │
+   └──────────────────┘  └──────────────────┘  └──────────────────────┘
+                                               ┌──────────────────────┐
+                                               │ bare StarDist        │
+                                               │ (seedpool ignored)   │
+                                               └──────────────────────┘
+```
+
+### Result fields per scenario
+
+`Result.*` fields are populated **only when the corresponding model
+runs** — otherwise they stay `None`. The factory's job is to pick a
+pipeline shape that produces the maximal set of fields for the
+supplied models.
+
+| `care` | `roi_unet` | `unet` | `stardist` | `seedpool` | Pipeline composition (outer → inner)                                                  | `Result` fields populated                                                              |
+| :----: | :--------: | :----: | :--------: | :--------: | --------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| ✓      | ✓          | ✓      | ✓          |     T      | `Denoised( ROI( UNetStarDist(unet, stardist, seedpool=T) ) )`                          | `labels = vollseg_labels`, `stardist_labels`, `unet_labels`, `semantic`, `denoised`, `roi`, `polys` |
+| ✗      | ✗          | ✓      | ✓          |     T      | `UNetStarDist(unet, stardist, seedpool=T)`                                              | `labels = vollseg_labels`, `stardist_labels`, `unet_labels`, `semantic`, `polys`        |
+| ✓      | ✗          | ✗      | ✓          |     T      | `Denoised( UNetStarDist(unet=None, stardist, seedpool=T) )` — Otsu threshold seed pool  | `labels = vollseg_labels`, `stardist_labels`, `semantic` (Otsu), `denoised`, `polys`    |
+| ✗      | ✗          | ✓      | ✓          |     F      | `UNetStarDist(unet, stardist, seedpool=F)` — side by side                               | `labels = stardist_labels`, `stardist_labels`, `unet_labels`, `semantic`, `polys`       |
+| ✓      | ✓          | ✗      | ✓          |     F      | `Denoised( ROI( stardist ) )` — bare StarDist on denoised ROI crop                      | `labels`, `denoised`, `roi`, `polys`                                                    |
+| ✓      | ✗          | ✗      | ✓          |     F      | `Denoised( stardist )` — denoise then StarDist                                          | `labels`, `denoised`, `polys`                                                            |
+| ✓      | ✗          | ✓      | ✗          | any        | `Denoised( unet )` — denoise then U-Net                                                  | `labels`, `semantic`, `probability`, `denoised`                                          |
+| ✗      | ✗          | ✓      | ✗          | any        | bare U-Net singleton (`seedpool` ignored, no `stardist` to fuse)                          | `labels`, `semantic`, `probability`                                                      |
+| ✗      | ✗          | ✗      | ✓          | any        | bare StarDist singleton (`seedpool` ignored — no `unet` and no `care` to source a mask)  | `labels`, `probability`, `polys`                                                         |
+| ✓      | ✗          | ✗      | ✗          | any        | bare CARE singleton — "denoise as the whole pipeline"                                    | `denoised`                                                                               |
+| ✗      | ✓          | ✗      | ✗          | any        | bare Mask-UNet singleton — its output is the ROI mask itself                             | `labels`, `semantic`, `probability`                                                      |
+| ✗      | ✗          | ✗      | ✗          | any        | **`ValueError`** — no model to do anything with                                          | —                                                                                        |
+
+Permissive rules — the **only** failure mode is "no model supplied":
+
+- `seedpool=True` is **silently ignored** when its prerequisites aren't
+  met (no `stardist` to fuse; or no `unet` AND no `care` to source the
+  mask). The factory falls back to the next-best shape.
+- Any single-model configuration returns the bare singleton.
+- Composition only kicks in when there's actually something to compose.
+
+```python
+# Production pipeline for embryo timelapses — denoise, ROI-gate, segment.
+pipe = VollSeg.from_models(
+    care=care, roi_unet=roi, stardist=star, unet=unet,
+    seedpool=True,                  # auto-ignored if prerequisites missing
+    chunk=(64, 256, 256),           # optional → wraps in Chunked
+)
+result = pipe.predict(image)
+result.vollseg_labels   # watershed-fused instance labels (canonical = labels)
+result.stardist_labels  # raw StarDist instances
+result.unet_labels      # CC labels of U-Net mask
+result.semantic         # U-Net binary mask
+result.denoised         # CARE output
+result.roi              # ROI gating mask
+```
 
 ## StarDist — PyTorch port
 

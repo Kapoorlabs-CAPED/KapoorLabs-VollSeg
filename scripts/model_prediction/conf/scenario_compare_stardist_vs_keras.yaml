@@ -1,8 +1,0 @@
-defaults:
-  - _self_
-  - parameters: compare_stardist_vs_keras
-  # ``train_data_paths`` is the same group the threshold optimiser uses,
-  # so swapping ``xenopus_jeanzay`` for any other ``log_path`` lets you
-  # compare a different StarDist checkpoint against the same keras ref.
-  - train_data_paths: xenopus_jeanzay
-  - compare_data_paths: jeanzay
